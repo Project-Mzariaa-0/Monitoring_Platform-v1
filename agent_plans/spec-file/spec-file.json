@@ -1,0 +1,276 @@
+{
+  "project": {
+    "name": "Milking Process Compliance Monitor",
+    "client": "Milk production company",
+    "problem_statement": "Supervisors cannot verify that milking staff correctly perform every required task (cleaning, stripping, machine attachment, milking, detachment, post-dip) for each cow, leading to inconsistent hygiene/process compliance and no objective way to measure employee performance.",
+    "proposed_solution": "Computer-vision pipeline (YOLOv8-based detection + temporal state machine) monitoring a fixed side camera covering the first two cows of a two-row barn, paired with a Next.js supervisor application for scheduling, live monitoring, statistics, and reporting.",
+    "mvp_scope_note": "This is a PILOT/DEMO scope covering only the two cows visible to the camera, not the full row. Full-row coverage is an explicit Phase 2 item requiring additional cameras."
+  },
+
+  "known_limitations": [
+    {
+      "id": "LIM-01",
+      "limitation": "Only 2 cows per session are monitored (camera field of view). Remaining cows in both rows are not observed by the system in this pilot phase.",
+      "impact": "Analytics and compliance reporting apply only to the 2 monitored cows per session, not the full herd."
+    },
+    {
+      "id": "LIM-02",
+      "limitation": "Single side-angle camera causes occlusion during close-contact tasks (cleaning, stripping, dipping) since the worker's body blocks the udder from this angle.",
+      "impact": "System can reliably verify TASK OCCURRENCE, SEQUENCE, and DURATION (presence/motion-based detection), but NOT quality/correctness of execution (e.g. cannot confirm iodine was applied to all 4 teats)."
+    },
+    {
+      "id": "LIM-03",
+      "limitation": "Stripping's core hygiene purpose (visually checking milk for discoloration/infection) is not verifiable by any camera angle since it requires close inspection of milk in a handheld cup.",
+      "impact": "System verifies that the stripping ACTION occurred (motion signature + duration at each teat), not the health assessment outcome."
+    },
+    {
+      "id": "LIM-04",
+      "limitation": "Employee identity is supervisor-asserted (entered/selected in the multi-step form), not independently verified by hardware (no RFID/badge) or biometrics in MVP.",
+      "impact": "Per-employee performance stats are only as accurate as the supervisor's assignment. Supervisor can edit the assignment post-hoc if a mistake is noticed on the live dashboard."
+    },
+    {
+      "id": "LIM-05",
+      "limitation": "Session start/end is a coarse supervisor-defined window, not a per-cow boundary.",
+      "impact": "The window tells the inference service when to actively watch; the system itself must auto-detect where one cow's process ends and the next begins within that window."
+    }
+  ],
+
+  "ml_pipeline": {
+    "architecture": {
+      "layer_1": {
+        "name": "Object/region detector",
+        "model": "YOLOv8 (custom-trained)",
+        "purpose": "Per-frame detection of: person, hands, cow udder region, iodine/spray bottle, stripping cup, teat cups/milking machine (attached vs detached state), post-dip applicator.",
+        "output": "Bounding boxes + class labels + confidence, per frame."
+      },
+      "layer_2": {
+        "name": "Temporal state machine / task-sequence engine",
+        "purpose": "Consumes Layer 1 detections over time to infer task start/end, duration, sequence correctness, and missed tasks. Also infers cow-process boundaries (see hierarchy below).",
+        "approach_options": [
+          "Rule-based state machine (object presence + duration + proximity thresholds) — recommended for MVP, faster to build/debug, easier to tune with supervisors.",
+          "Learned temporal model (e.g. lightweight LSTM/temporal-CNN over Layer 1 detections) — candidate for Phase 2 once enough labeled session data exists."
+        ],
+        "mvp_choice": "Rule-based state machine"
+      }
+    },
+
+    "detection_hierarchy": {
+      "description": "Session (supervisor-defined, coarse) contains multiple CowProcesses (model-detected, granular) each containing multiple TaskEvents (model-detected, per task).",
+      "levels": ["Session", "CowProcess", "TaskEvent"]
+    },
+
+    "camera_setup": {
+      "count": 1,
+      "position": "Side of the two rows, fixed field of view covering the first two cow positions only",
+      "resolution": "High-resolution (per client), does not resolve occlusion — occlusion is a geometry problem, not a pixel-count problem",
+      "scaling_plan": "Phase 2: additional cameras/angles per row to (a) cover more cows, (b) reduce occlusion for quality verification"
+    },
+
+    "milking_tasks": [
+      {
+        "id": "TASK-01",
+        "name": "Pre-milking cleaning",
+        "description": "Udder and teats cleaned with iodine-based solution and dried.",
+        "detection_signal": "Person's hands + spray/cleaning tool detected near udder region, sustained motion for minimum duration.",
+        "verifiable_by_camera": "Occurrence and duration only, not thoroughness of cleaning.",
+        "missed_task_rule": "No qualifying hand+tool+udder-proximity motion detected for minimum threshold before machine attachment begins."
+      },
+      {
+        "id": "TASK-02",
+        "name": "Stripping",
+        "description": "Manual squirting of first streams from each teat into a separate container; checks for discoloration and stimulates oxytocin release.",
+        "detection_signal": "Hand + stripping cup detected near udder, characteristic short repeated motion, sustained for minimum duration.",
+        "verifiable_by_camera": "Occurrence and duration only. Discoloration/health check outcome is NOT verifiable (see LIM-03).",
+        "missed_task_rule": "No qualifying stripping motion signature detected before machine attachment."
+      },
+      {
+        "id": "TASK-03",
+        "name": "Machine attachment",
+        "description": "Teat cups attached, vacuum system begins pulsation.",
+        "detection_signal": "Milking machine/teat-cup object transitions from 'detached' to 'attached' state near udder.",
+        "verifiable_by_camera": "High confidence — clear object state change.",
+        "missed_task_rule": "Machine never transitions to attached state within session window for this cow."
+      },
+      {
+        "id": "TASK-04",
+        "name": "Milking (active extraction)",
+        "description": "Machine pulsates ~40x/min, typically 5-7 minutes per cow.",
+        "detection_signal": "Machine remains in attached state; duration timer running.",
+        "verifiable_by_camera": "Duration is directly measurable. Pulsation rate verification would require machine telemetry, not camera (flagged as out of MVP scope).",
+        "missed_task_rule": "Attached duration significantly below expected range (configurable threshold, default flags <3 min as anomaly for supervisor review, not auto-fail)."
+      },
+      {
+        "id": "TASK-05",
+        "name": "Machine detachment",
+        "description": "Machine detached, often automatically once flow stops.",
+        "detection_signal": "Milking machine/teat-cup object transitions from 'attached' to 'detached' state.",
+        "verifiable_by_camera": "High confidence — clear object state change.",
+        "missed_task_rule": "N/A (implied by process end) — flagged only if attachment never ends within a reasonable max duration (possible equipment issue alert)."
+      },
+      {
+        "id": "TASK-06",
+        "name": "Post-dip disinfectant application",
+        "description": "Post-dip disinfectant applied to teats after detachment.",
+        "detection_signal": "Hand + dip applicator detected near udder shortly after machine detachment.",
+        "verifiable_by_camera": "Occurrence and duration only, not coverage of all teats.",
+        "missed_task_rule": "No qualifying dip-application motion detected within a configurable window after detachment, before the worker moves away from the cow."
+      }
+    ],
+
+    "cow_process_boundary_detection": {
+      "start_signal": "First qualifying task motion (TASK-01 signature) detected at a monitored cow position with no currently-active CowProcess for that position.",
+      "end_signal": "TASK-06 completed (or timeout) AND worker/motion detected moving away from that cow position.",
+      "note": "This boundary detection is effectively the same detection problem as task detection, one level coarser — it wraps the task state machine in an outer 'cow present / process active / process complete' state, not a separate system."
+    },
+
+    "training_data_requirements": {
+      "minimum_scope": "Multiple employees, multiple lighting/weather conditions, both monitored cow positions, wet/dirty barn conditions represented.",
+      "labeling_need": "Segment-level (start/end timestamp) labels per task per cow-process, not just bounding boxes — this labeling is significantly more labor-intensive than standard YOLO box labeling and should be budgeted accordingly.",
+      "recommendation": "Start with a small labeled pilot set to validate the rule-based state machine thresholds before investing in large-scale labeling."
+    },
+
+    "inference_service": {
+      "why_separate_from_web_app": "Next.js cannot run real-time YOLOv8 inference on a live RTSP stream in production. A dedicated service is required.",
+      "proposed_stack": "Python, FastAPI, Ultralytics YOLOv8, OpenCV for RTSP ingestion and frame-splitting (2 ROIs, one per monitored cow position)",
+      "data_flow": [
+        "Camera RTSP stream -> inference service",
+        "Inference service splits frame into 2 ROIs (cow position 1, cow position 2)",
+        "Layer 1 detection per ROI per frame",
+        "Layer 2 state machine tracks CowProcess + TaskEvent state per ROI",
+        "On state change (task started/completed/missed, cow process started/ended), service emits event to backend (webhook or message queue)",
+        "Backend persists event to Postgres and pushes update to dashboard via WebSocket/SSE"
+      ],
+      "trigger_model": "Inference service is active during the supervisor-defined session window (coarse start/end), not solely trusting the schedule for task-level timing — actual task/process boundaries are auto-detected within that window."
+    }
+  },
+
+  "data_model": {
+    "entities": [
+      {
+        "name": "Supervisor",
+        "fields": ["id", "name", "email", "clerk_user_id"]
+      },
+      {
+        "name": "Employee",
+        "fields": ["id", "name"],
+        "note": "Simple roster entity for MVP; selected/assigned by supervisor in the multi-step form. No independent identity verification in MVP (see LIM-04)."
+      },
+      {
+        "name": "Session",
+        "fields": [
+          "id", "supervisor_id", "employee_id (editable post-creation)",
+          "scheduled_start_time", "estimated_end_time", "actual_end_time",
+          "row_1_cow_count", "row_2_cow_count",
+          "status (scheduled | active | completed | ended_early)"
+        ],
+        "note": "One coarse session = one watch-window. Covers activity for the 2 monitored cow positions only."
+      },
+      {
+        "name": "CowProcess",
+        "fields": [
+          "id", "session_id", "cow_position (1 | 2)",
+          "detected_start_time", "detected_end_time",
+          "overall_status (in_progress | completed | completed_with_missed_tasks)"
+        ],
+        "note": "Auto-detected by the ML pipeline, not manually entered."
+      },
+      {
+        "name": "TaskEvent",
+        "fields": [
+          "id", "cow_process_id", "task_id (TASK-01..TASK-06)",
+          "detected_start_time", "detected_end_time", "duration_seconds",
+          "status (completed | missed | anomaly_flagged)"
+        ]
+      },
+      {
+        "name": "Report",
+        "fields": ["id", "session_id", "generated_at", "docx_file_url", "email_sent_at"]
+      }
+    ]
+  },
+
+  "application": {
+    "auth": {
+      "provider": "Clerk",
+      "pages": ["Sign in", "Sign up"],
+      "roles": "Supervisor (MVP has a single role; multi-role/RBAC is a Phase 2 consideration if the client wants employee logins too)"
+    },
+    "multi_step_form": {
+      "purpose": "Supervisor schedules a monitoring session before milking begins.",
+      "steps": [
+        {"step": 1, "fields": ["scheduled_start_time", "estimated_end_time"]},
+        {"step": 2, "fields": ["row_1_cow_count", "row_2_cow_count"]},
+        {"step": 3, "fields": ["assigned_employee"]},
+        {"step": 4, "fields": ["supervisor_name", "supervisor_email"]}
+      ],
+      "validation": "Zod schema validation on client and server; sanitize all text inputs before persistence."
+    },
+    "dashboard_realtime": {
+      "purpose": "Supervisor views live status of the active session.",
+      "displays": [
+        "Current session window (elapsed / estimated remaining)",
+        "Per monitored cow position: current task in progress, task-by-task completion checklist, missed-task alerts as they occur",
+        "Ability to edit assigned employee if a discrepancy is noticed"
+      ],
+      "transport": "WebSocket or Server-Sent Events, fed by backend events originating from the inference service."
+    },
+    "statistics_page": {
+      "purpose": "Historical performance and compliance analytics.",
+      "metrics": [
+        "Sessions completed today / date range",
+        "Missed tasks count and breakdown by task type",
+        "Average duration per task type",
+        "Per-employee performance comparison (subject to LIM-04)",
+        "Filter by date range, employee, cow position"
+      ],
+      "export": "Downloadable Word (.docx) report summarizing the above for a selected session or date range."
+    },
+    "notifications": {
+      "email": {
+        "trigger": "Session end (auto-detected or supervisor-ended)",
+        "recipient": "Supervisor email from session record",
+        "content": "Session summary, per-cow-process task completion status, list of any missed tasks, task durations."
+      }
+    }
+  },
+
+  "tech_stack": {
+    "frontend": ["Next.js (App Router)", "shadcn/ui", "Tailwind CSS", "Framer Motion (UI transitions)"],
+    "decorative_optional": ["Three.js — decorative dashboard/landing flair only, explicitly NOT core to MVP functionality, build after core features are stable"],
+    "auth": ["Clerk"],
+    "database": ["PostgreSQL", "Drizzle ORM"],
+    "realtime": ["WebSocket or SSE for dashboard live updates", "Redis/BullMQ or equivalent queue between inference service and backend (recommended for reliability, avoids dropped events)"],
+    "ml_inference_service": ["Python", "FastAPI", "Ultralytics YOLOv8", "OpenCV (RTSP ingestion, ROI splitting)"],
+    "security": [
+      "Middleware-based rate limiting on API routes (especially auth and form submission endpoints)",
+      "Input validation/sanitization via Zod on all form and API inputs (XSS/injection protection)",
+      "CSRF protection on state-changing requests",
+      "Server-side authorization checks (supervisor can only view/edit their own sessions unless multi-tenant scoping says otherwise)"
+    ],
+    "reporting": ["docx (Node library) for Word report generation", "Resend or Nodemailer for transactional email"]
+  },
+
+  "open_questions_for_client": [
+    "Is the 2-monitored-cow pilot scope acceptable for launch, with full-row coverage explicitly deferred to a funded Phase 2?",
+    "Confirm acceptance that the system verifies task occurrence/sequence/duration, not execution quality (e.g. thoroughness of cleaning or dip coverage).",
+    "Any regulatory/consent considerations if biometric identification (face recognition) is pursued in a future phase?",
+    "Expected minimum/maximum duration per task, to calibrate anomaly/missed-task thresholds — needs a subject-matter conversation with an experienced milking supervisor, not just the general process description."
+  ],
+
+  "development_phases": {
+    "phase_1_mvp": [
+      "Auth + multi-step scheduling form",
+      "Rule-based state machine for the 6 tasks across 2 monitored cow positions",
+      "Real-time dashboard",
+      "Email notification on session end",
+      "Basic statistics page + Word export"
+    ],
+    "phase_2_candidates": [
+      "Additional cameras for full-row coverage and reduced occlusion",
+      "Face recognition as employee-identity cross-check",
+      "Learned temporal model replacing/augmenting rule-based state machine",
+      "Three.js 3D visualization polish",
+      "Multi-role access (e.g. employee-facing views)"
+    ]
+  }
+}

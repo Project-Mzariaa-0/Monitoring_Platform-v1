@@ -1,0 +1,168 @@
+{
+  "spike": {
+    "name": "ML Feasibility Spike",
+    "purpose": "Answer one question only: can YOLOv8 detection + a simple rule-based state machine detect the six milking tasks with usable confidence from the actual camera angle? No app, no database, no UI. Throwaway code, kept isolated from the main repos.",
+    "explicit_non_goals": [
+      "No Next.js app code",
+      "No database persistence",
+      "No authentication",
+      "No production-grade error handling",
+      "No final confidence thresholds — those come later from a larger labeled dataset"
+    ],
+    "go_no_go_question": "Is there a detectable signal for each of the six tasks above noise level, and how severe is occlusion in practice at this camera angle?"
+  },
+
+  "repo_layout": {
+    "root": "ml-spike/",
+    "structure": [
+      {
+        "path": "ml-spike/README.md",
+        "purpose": "One-page doc: what this spike answers, how to run it, and where to record findings. Not a full project README."
+      },
+      {
+        "path": "ml-spike/requirements.txt",
+        "purpose": "Pinned deps: ultralytics, opencv-python, numpy, pandas (for results tables), matplotlib (optional, for quick visual timeline plots)."
+      },
+      {
+        "path": "ml-spike/data/raw_clips/",
+        "purpose": "Sample video clips go here (gitignored — real footage should not be committed to source control).",
+        "naming_convention": "{employee_id}_{cow_position}_{date}_{clip_index}.mp4",
+        "example": "emp01_pos1_2026-07-01_001.mp4"
+      },
+      {
+        "path": "ml-spike/data/rois.json",
+        "purpose": "Manually defined pixel coordinates for the two regions of interest (cow position 1, cow position 2) within the fixed camera frame.",
+        "schema": {
+          "cow_position_1": {"x": "int", "y": "int", "width": "int", "height": "int"},
+          "cow_position_2": {"x": "int", "y": "int", "width": "int", "height": "int"}
+        }
+      },
+      {
+        "path": "ml-spike/models/",
+        "purpose": "Local YOLOv8 weights. Start with a pretrained/generic model to test person + object detection quality before any custom training is justified."
+      },
+      {
+        "path": "ml-spike/src/detect_objects.py",
+        "purpose": "Runs YOLOv8 on a clip, restricted to each ROI, frame by frame. Outputs raw per-frame detections (class, bounding box, confidence) to a JSON file per clip.",
+        "output_file": "ml-spike/results/{clip_name}_raw_detections.json"
+      },
+      {
+        "path": "ml-spike/src/state_machine.py",
+        "purpose": "Bare-bones rule-based state machine (per the spec's TASK-01..TASK-06 definitions). Consumes raw detections and produces candidate task events with a confidence score per event. This is intentionally simple — proving the concept, not the final tuned implementation.",
+        "output_file": "ml-spike/results/{clip_name}_task_events.json"
+      },
+      {
+        "path": "ml-spike/src/evaluate.py",
+        "purpose": "Compares produced task_events.json against a human-labeled ground truth file for the same clip. Outputs a per-task accuracy/confidence summary and flags where occlusion likely caused misses.",
+        "output_file": "ml-spike/results/{clip_name}_evaluation.json"
+      },
+      {
+        "path": "ml-spike/data/ground_truth/{clip_name}_labels.json",
+        "purpose": "Manually created by a human reviewer watching the clip: actual start/end time of each of the six tasks. This is the labeling format referenced in phase_0 of the delivery plan, tested here at small scale first."
+      },
+      {
+        "path": "ml-spike/results/summary_report.md",
+        "purpose": "Human-written findings after running the spike across all sample clips: does the signal exist, how bad is occlusion, which tasks are easiest/hardest to detect, and a recommendation on whether to proceed to Step 2 (walking skeleton) or revisit camera/approach first."
+      }
+    ]
+  },
+
+  "raw_detection_output_schema": {
+    "clip_name": "string",
+    "roi": "cow_position_1 | cow_position_2",
+    "frames": [
+      {
+        "frame_number": "int",
+        "timestamp_seconds": "float",
+        "detections": [
+          {
+            "class": "person | hand | udder_region | spray_bottle | stripping_cup | teat_cups_attached | teat_cups_detached | dip_applicator",
+            "confidence": "float (0-1)",
+            "bbox": {"x": "int", "y": "int", "width": "int", "height": "int"}
+          }
+        ]
+      }
+    ]
+  },
+
+  "task_event_output_schema": {
+    "clip_name": "string",
+    "roi": "cow_position_1 | cow_position_2",
+    "candidate_events": [
+      {
+        "task_id": "TASK-01 | TASK-02 | TASK-03 | TASK-04 | TASK-05 | TASK-06",
+        "detected_start_seconds": "float",
+        "detected_end_seconds": "float",
+        "confidence_score": "float (0-1), based on detection consistency and duration over the event window",
+        "status_guess": "completed | missed | unverifiable",
+        "note": "status_guess here is provisional/experimental — real thresholds are not finalized until phase_0/phase_3 of the delivery plan, using a much larger labeled dataset."
+      }
+    ]
+  },
+
+  "ground_truth_label_schema": {
+    "clip_name": "string",
+    "roi": "cow_position_1 | cow_position_2",
+    "labeled_by": "string (reviewer name)",
+    "labeled_events": [
+      {
+        "task_id": "TASK-01 | TASK-02 | TASK-03 | TASK-04 | TASK-05 | TASK-06",
+        "actual_start_seconds": "float",
+        "actual_end_seconds": "float",
+        "actually_occurred": "boolean",
+        "occluded_from_camera": "boolean, true if a human reviewer also could not clearly see this task from the recorded angle"
+      }
+    ]
+  },
+
+  "evaluation_output_schema": {
+    "clip_name": "string",
+    "per_task_summary": [
+      {
+        "task_id": "string",
+        "detected_correctly": "boolean",
+        "timing_offset_seconds": "float, difference between detected and actual start time",
+        "false_positive": "boolean",
+        "false_negative": "boolean",
+        "occlusion_flagged_by_human_reviewer": "boolean"
+      }
+    ],
+    "overall_notes": "free text — anything the reviewer noticed that the schema doesn't capture"
+  },
+
+  "minimum_sample_set_for_spike": {
+    "clips_needed": "10-15 to start",
+    "coverage": [
+      "At least 2 different employees",
+      "Both monitored cow positions",
+      "At least one clip in suboptimal lighting if available",
+      "At least one clip where the reviewer expects occlusion to be a problem (e.g. employee crouched fully in front of udder)"
+    ],
+    "note": "This is a feasibility sample, not the full labeled dataset required later in phase_0/phase_3. Do not skip straight to large-scale labeling before this small spike gives a go/no-go signal."
+  },
+
+  "how_to_run": {
+    "steps": [
+      "1. Place sample clips in data/raw_clips/, define ROIs in data/rois.json.",
+      "2. Human reviewer creates ground_truth labels for each clip in data/ground_truth/.",
+      "3. Run detect_objects.py on each clip to produce raw detections.",
+      "4. Run state_machine.py to produce candidate task events.",
+      "5. Run evaluate.py to compare candidates against ground truth.",
+      "6. Write findings into results/summary_report.md.",
+      "7. Review findings against the go/no-go criteria before starting the walking skeleton (Step 2)."
+    ]
+  },
+
+  "go_no_go_criteria": {
+    "proceed_to_step_2_if": [
+      "Attachment/detachment events (TASK-03, TASK-05) are detected with high confidence and low timing offset — these are the least occlusion-prone and most important for session/cow-process boundaries.",
+      "At least a usable signal (even if noisy) exists for cleaning, stripping, and post-dip tasks — perfect accuracy is not required at this stage, just evidence the approach is not fundamentally blind to them.",
+      "Occlusion-flagged cases in ground truth roughly correspond to low-confidence/false-negative cases in detection — this validates that the unverifiable classification concept will work as intended."
+    ],
+    "pause_and_reconsider_if": [
+      "Attachment/detachment detection itself is unreliable — this would undermine the entire session/cow-process boundary logic, not just task-level detail.",
+      "Occlusion is so severe that almost no signal exists for 3+ of the 6 tasks regardless of confidence threshold — this may mean a camera/angle change is needed before more software investment.",
+      "Detections are inconsistent across different employees in a way that suggests the model needs far more training data than initially planned."
+    ]
+  }
+}

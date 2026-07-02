@@ -1,0 +1,360 @@
+{
+  "project": {
+    "name": "Milking Process Compliance Monitor",
+    "type": "pilot_delivery_plan",
+    "source_spec": "../spec-file/spec-file.json",
+    "revision": "v2 - addresses gaps identified in v1 review",
+    "planning_assumptions": [
+      "The MVP monitors only the two cow positions visible to the fixed side camera.",
+      "The system verifies task occurrence, sequence, and duration, not execution quality.",
+      "Employee identity is supervisor-assigned in MVP and may be edited post-hoc, with the change logged.",
+      "Real-time inference runs in a separate Python service and feeds events to the web app via a backend-owned ingestion layer.",
+      "Low-confidence detections are classified as unverifiable, not missed, to avoid penalizing employees for camera blind spots."
+    ],
+    "known_gaps": [
+      {
+        "gap": "No effort/timeline estimation per phase.",
+        "reason": "Sizing requires real team velocity data, which this planning pass does not have. Treat this as a dependency graph and scope document, not a schedule, until estimation is done separately."
+      }
+    ]
+  },
+
+  "data_model_additions": {
+    "note": "Additions to the entities defined in the source spec, made to address v1 review findings.",
+    "entities": [
+      {
+        "name": "TaskEvent",
+        "change": "amended",
+        "fields_added": ["confidence_score", "status now includes 'unverifiable' in addition to 'completed' and 'missed'"],
+        "override_fields": [
+          "override_status (nullable)",
+          "override_reason (nullable, required if override_status is set)",
+          "overridden_by (supervisor id, nullable)",
+          "overridden_at (timestamp, nullable)"
+        ],
+        "note": "Original detected status/confidence is never overwritten by an override. The override is stored alongside the original for audit purposes; the UI displays the effective status (override if present, else detected) but both are queryable."
+      },
+      {
+        "name": "AuditLog",
+        "change": "new",
+        "fields": [
+          "id", "entity_type (session | task_event)", "entity_id",
+          "field_changed", "old_value", "new_value",
+          "changed_by (supervisor id)", "changed_at", "reason"
+        ],
+        "note": "Written on employee reassignment (Session.employee_id changes) and on any TaskEvent override."
+      }
+    ]
+  },
+
+  "phases": [
+    {
+      "id": "phase_0",
+      "name": "Discovery and scope lock",
+      "goal": "Convert the domain requirements into implementation-ready rules, data contracts, and success criteria before building core features.",
+      "objectives": [
+        "Confirm pilot scope and sign off on the two-cow camera limitation.",
+        "Define task timing thresholds, anomaly thresholds, and missed-task rules with a milking supervisor.",
+        "Define confidence-score thresholds that distinguish 'missed' (high-confidence no-action) from 'unverifiable' (low-confidence/occluded) task detections.",
+        "Freeze the task taxonomy, session boundaries, and event semantics used by the backend and inference service.",
+        "Define the labeling format needed for pilot data collection and model tuning.",
+        "Confirm on-site infrastructure readiness: camera installation, RTSP endpoint reachability, and network stability."
+      ],
+      "deliverables": [
+        "Signed scope document for pilot constraints and exclusions.",
+        "Task event contract describing start, end, missed, unverifiable, and anomaly states, including confidence-score thresholds.",
+        "Labeling guide for segment-level task annotations.",
+        "Initial acceptance criteria for the MVP pilot.",
+        "Site infrastructure readiness checklist (camera, network, RTSP endpoint)."
+      ],
+      "dependencies": [],
+      "risks": [
+        "Thresholds may be too loose or too strict without supervisor input.",
+        "Labeling effort may be underestimated because segment labeling is more expensive than box labeling.",
+        "Site infrastructure may not be pilot-ready, blocking phase_3 development."
+      ],
+      "acceptance_criteria": [
+        "Client confirms the 2-cow pilot scope and agrees that quality verification is out of scope.",
+        "Each of the six tasks has a clear detection rule, miss rule, unverifiable rule, and anomaly rule.",
+        "A minimal dataset plan exists for both monitored positions under different barn conditions, specifying a minimum labeled-footage benchmark (hours, positions covered, minimum number of distinct employees) required before MVP thresholds are finalized.",
+        "Camera and network infrastructure on site is confirmed functional and reachable for development and testing."
+      ]
+    },
+    {
+      "id": "phase_1",
+      "name": "Platform foundation",
+      "goal": "Establish the application, database, authentication, validation, security baseline, and event transport layer needed by all later work.",
+      "objectives": [
+        "Create the Next.js App Router foundation with the UI stack specified in the spec.",
+        "Set up Clerk authentication for supervisor sign-in and sign-up pages.",
+        "Implement the PostgreSQL and Drizzle schema for Supervisor, Employee, Session, CowProcess, TaskEvent (with confidence_score and override fields), AuditLog, and Report.",
+        "Add Zod validation, sanitization, CSRF protection, and API rate limiting.",
+        "Build the event ingestion API that will receive events from the inference service, persist them, and broadcast them to connected dashboard clients.",
+        "Create the shared application layout, navigation, and empty states for the main sections."
+      ],
+      "deliverables": [
+        "Working authenticated shell for supervisors.",
+        "Database migrations and typed models for the core entities, including AuditLog.",
+        "Reusable server-side validation and authorization helpers.",
+        "Event ingestion API + persistence + WebSocket/SSE broadcast layer (owned here; consumed by phase_3's publisher and phase_4's dashboard).",
+        "Base UI layout for scheduling, live monitoring, statistics, and reports."
+      ],
+      "dependencies": ["phase_0"],
+      "risks": [
+        "Auth and database modeling can drift if the session lifecycle is not locked early.",
+        "Security middleware may need refactoring if API shapes change later.",
+        "If the event transport layer's contract isn't stable before phase_3 starts, both workstreams may build against mismatched assumptions."
+      ],
+      "acceptance_criteria": [
+        "A supervisor can authenticate and reach a protected application shell.",
+        "Core entities are persisted with server-side validation and authorization checks.",
+        "State-changing routes are protected by CSRF and rate limiting.",
+        "The event ingestion API can accept a test event and broadcast it to a connected client end-to-end, independent of the real inference service being ready."
+      ]
+    },
+    {
+      "id": "phase_2",
+      "name": "Scheduling and session management",
+      "goal": "Deliver the supervisor workflow for creating and managing a monitoring session before milking begins.",
+      "objectives": [
+        "Build the four-step scheduling form with client and server Zod validation.",
+        "Persist session drafts and finalized sessions with editable assigned employee data.",
+        "Log every employee reassignment to AuditLog (old value, new value, who, when).",
+        "Support session status transitions for scheduled, active, completed, and ended_early.",
+        "Add supervisor identity capture for session attribution.",
+        "Create session management views for editing, viewing, and re-opening session records, including a visible edit history."
+      ],
+      "deliverables": [
+        "Multi-step session creation flow.",
+        "Session detail page with editable metadata.",
+        "Stored supervisor and employee assignment workflow with audit logging.",
+        "Status transition logic for session lifecycle management.",
+        "Edit-history view on the session detail page, sourced from AuditLog."
+      ],
+      "dependencies": ["phase_1"],
+      "risks": [
+        "Schedule edits near session start may complicate downstream inference triggers."
+      ],
+      "acceptance_criteria": [
+        "A supervisor can create a session with start time, estimated end time, cow counts, employee, and identity details.",
+        "Session edits are persisted safely, logged to AuditLog, and remain visible in the dashboard, statistics, and edit-history views.",
+        "The app can represent an active live watch window separate from the task-level detection state."
+      ]
+    },
+    {
+      "id": "phase_3",
+      "name": "Inference service MVP",
+      "goal": "Implement the separate Python service that ingests RTSP video, detects objects, and emits task events for the two monitored cow positions.",
+      "objectives": [
+        "Set up FastAPI, OpenCV, and Ultralytics YOLOv8 ingestion for a live RTSP stream.",
+        "Split each frame into two regions of interest matching the monitored cow positions.",
+        "Implement the rule-based temporal state machine for the six milking tasks.",
+        "Detect cow-process start and end boundaries within the supervisor-defined session window.",
+        "Emit structured events for task started, task completed, missed task, unverifiable task, anomaly flagged, cow process started, and cow process completed, each carrying a confidence_score.",
+        "Classify each task event as completed, missed, or unverifiable using the confidence thresholds defined in phase_0.",
+        "Publish events to the ingestion API built in phase_1, tagged correctly with session_id and cow_position."
+      ],
+      "deliverables": [
+        "Standalone inference service with configuration for stream source and thresholds.",
+        "Task-event schema shared with the backend, including confidence_score and the unverifiable status.",
+        "State machine implementation for the six tasks across two cow positions.",
+        "Event publisher integrated with the phase_1 ingestion API.",
+        "Integration test suite verifying events are correctly tagged to session_id/cow_position and correctly gated by the session's watch window."
+      ],
+      "dependencies": ["phase_0", "phase_1"],
+      "risks": [
+        "Occlusion may cause false negatives for cleaning, stripping, and post-dip — mitigated by the unverifiable classification, but the confidence threshold itself needs real tuning data.",
+        "The first model pass may detect object presence but not enough temporal precision without tuning.",
+        "Stream stability and frame timing may affect task boundary inference.",
+        "Insufficient labeled footage at this stage could produce unreliable thresholds; do not finalize thresholds until the phase_0 labeled-footage benchmark is met."
+      ],
+      "acceptance_criteria": [
+        "The service can watch a live stream and produce deterministic per-ROI task events.",
+        "Attachment and detachment events are detected with high confidence.",
+        "The service distinguishes between task occurrence and task quality limitations exactly as the spec requires.",
+        "Low-confidence detections due to occlusion are classified as unverifiable, not missed.",
+        "The integration test suite passes: events reliably arrive at the backend correctly tagged and time-gated before phase_4 dashboard work begins."
+      ]
+    },
+    {
+      "id": "phase_4",
+      "name": "Real-time dashboard and analytics",
+      "goal": "Expose live session state to supervisors, allow correction of detection errors, and provide historical analytics for operational review.",
+      "objectives": [
+        "Build a real-time dashboard powered by WebSocket or SSE updates from the phase_1 ingestion/broadcast layer.",
+        "Show current session progress, current task per cow position, and per-task completion state, distinguishing completed / missed / unverifiable visually.",
+        "Allow supervisors to correct the assigned employee on the live session when needed (writes to AuditLog).",
+        "Allow supervisors to override a task's status (e.g. unverifiable or missed -> completed) with a required reason note, without deleting the original detected status.",
+        "Create the statistics page with filtering by date range, employee, and cow position.",
+        "Surface missed-task alerts, unverifiable-task notices, and duration anomalies as they occur."
+      ],
+      "deliverables": [
+        "Live monitoring UI for the active session.",
+        "Manual override UI for task status corrections, backed by AuditLog.",
+        "Historical statistics dashboard.",
+        "Filterable summary views for task counts, durations, and employee comparison.",
+        "Live update transport wired to the phase_1 broadcast layer, with reconnect/retry handling."
+      ],
+      "dependencies": ["phase_2", "phase_3"],
+      "risks": [
+        "Realtime transport may need retry and reconnect handling to avoid stale views.",
+        "Analytics accuracy depends on consistent event emission from the inference service.",
+        "If phase_3's integration test suite has not passed, dashboard development risks building against unreliable event data."
+      ],
+      "acceptance_criteria": [
+        "A supervisor can watch live cow-process state update within a few seconds of event emission.",
+        "Missed tasks, unverifiable tasks, and anomalies are visible immediately and distinguishably on the dashboard.",
+        "A supervisor can override a task's status with a required reason, and the override is visible alongside the original detected status in the audit history.",
+        "Historical filtering works for sessions, employees, tasks, and monitored positions."
+      ]
+    },
+    {
+      "id": "phase_5",
+      "name": "Reporting and notifications",
+      "goal": "Automate report generation and end-of-session communication for supervisors.",
+      "objectives": [
+        "Generate Word reports for a selected session or date range using the recorded task data.",
+        "Send transactional email to the supervisor when a session ends.",
+        "Include session summary, task durations, missed/unverifiable/overridden tasks, and per-cow-process completion details in the report output.",
+        "Persist report metadata and generated file location in the database."
+      ],
+      "deliverables": [
+        "Docx report generator, clearly distinguishing detected-missed, unverifiable, and supervisor-overridden task outcomes.",
+        "Email notification flow using Resend or Nodemailer.",
+        "Report record linked to the session.",
+        "Download action from the statistics or session detail view."
+      ],
+      "dependencies": ["phase_2", "phase_4"],
+      "risks": [
+        "Report content may need formatting refinement for client-facing readability.",
+        "Email delivery can fail independently of session completion and should not block the workflow.",
+        "Conflating unverifiable and missed in the report would misrepresent employee performance — must remain visually/textually distinct."
+      ],
+      "acceptance_criteria": [
+        "A completed session produces a downloadable .docx report.",
+        "The supervisor receives a session-end email with the main summary data.",
+        "Report generation works for both single-session and filtered-range views.",
+        "The report clearly separates missed, unverifiable, and overridden task outcomes rather than merging them into one 'non-completed' bucket."
+      ]
+    },
+    {
+      "id": "phase_6",
+      "name": "Pilot hardening and rollout",
+      "goal": "Stabilize the system for the first on-farm pilot and prepare a controlled launch.",
+      "objectives": [
+        "Test the end-to-end flow under varied lighting, weather, and barn conditions.",
+        "Tune thresholds (including missed/unverifiable confidence cutoffs) using pilot recordings and supervisor review.",
+        "Add logging, error handling, and operator-friendly fallback states.",
+        "Document deployment, restart, and troubleshooting steps for the operator.",
+        "Run a narrow pilot with the two monitored cow positions before any scaling effort."
+      ],
+      "deliverables": [
+        "Validated pilot deployment checklist.",
+        "Threshold tuning notes and known false-positive/false-negative/unverifiable-rate cases.",
+        "Operational runbook for supervisors and maintainers.",
+        "Pilot feedback log for future iteration, including how often supervisors used the manual override."
+      ],
+      "dependencies": ["phase_1", "phase_2", "phase_3", "phase_4", "phase_5"],
+      "risks": [
+        "The pilot may expose more false negatives/unverifiable rates than expected because the camera angle is fixed and occluded.",
+        "If event timing is noisy, the report layer may need stricter normalization rules.",
+        "A high override rate may indicate thresholds need retuning rather than treating overrides as one-off corrections."
+      ],
+      "acceptance_criteria": [
+        "The system can run a full pilot session end-to-end without manual intervention beyond supervisor session setup and legitimate corrections.",
+        "Known limitations are documented clearly for the client and operators.",
+        "Operational issues and override-rate patterns are captured in a backlog for the next iteration."
+      ]
+    },
+    {
+      "id": "phase_7",
+      "name": "Phase 2 expansion roadmap",
+      "goal": "Prepare the next funded iteration that addresses the explicit limitations left out of the MVP.",
+      "objectives": [
+        "Add additional cameras or angles for full-row coverage and reduced occlusion.",
+        "Evaluate a learned temporal model to replace or augment the rule-based state machine, informed by pilot override-rate and unverifiable-rate data.",
+        "Introduce optional employee identity cross-checking such as face recognition if legally and operationally approved.",
+        "Consider multi-role access and employee-facing views if the business asks for them.",
+        "Add non-essential visual polish such as Three.js only after core reliability is stable."
+      ],
+      "deliverables": [
+        "Expansion requirements brief.",
+        "Camera coverage and infrastructure proposal.",
+        "ML evolution plan based on pilot label quality, override rates, and collected sessions.",
+        "Feature prioritization for the next funding phase."
+      ],
+      "dependencies": [],
+      "note": "Can be scoped in parallel with any phase from phase_1 onward — it does not need to wait for phase_6 to begin planning. Implementation of expansion items, however, should wait until pilot learnings from phase_6 exist.",
+      "risks": [
+        "Scaling before the pilot proves the thresholds may produce unreliable analytics.",
+        "Identity verification introduces regulatory and consent complexity."
+      ],
+      "acceptance_criteria": [
+        "The team has a funded, ordered backlog for the next phase of product growth.",
+        "Every MVP limitation has a corresponding expansion path or explicit reason for deferral."
+      ]
+    }
+  ],
+
+  "cross_cutting_workstreams": [
+    {
+      "name": "Data and labeling",
+      "applies_to": ["phase_0", "phase_3", "phase_6"],
+      "items": [
+        "Collect representative sessions across multiple employees and barn conditions.",
+        "Define segment labels for task starts and ends per cow process.",
+        "Track labeling quality and disagreements to improve threshold tuning.",
+        "Do not finalize missed/unverifiable confidence thresholds until the phase_0 labeled-footage benchmark is met."
+      ]
+    },
+    {
+      "name": "Security and compliance",
+      "applies_to": ["phase_1", "phase_2", "phase_4", "phase_5", "phase_6"],
+      "items": [
+        "Enforce server-side authorization for every session, report, and edit operation.",
+        "Validate and sanitize all form and API inputs.",
+        "Apply rate limiting to auth and submission endpoints.",
+        "Document any future consent requirements before identity-related enhancements."
+      ]
+    },
+    {
+      "name": "Observability",
+      "applies_to": ["phase_1", "phase_3", "phase_4", "phase_6"],
+      "items": [
+        "Log inference service state transitions and event emissions.",
+        "Trace missing or duplicated task events back to their source frame windows.",
+        "Monitor transport failures between the inference service and backend.",
+        "Track override frequency per task type as a signal for threshold retuning."
+      ]
+    },
+    {
+      "name": "Fairness and auditability",
+      "applies_to": ["phase_0", "phase_2", "phase_3", "phase_4", "phase_5"],
+      "items": [
+        "Never conflate 'unverifiable due to occlusion' with 'missed due to employee action' in any UI, report, or stats aggregation.",
+        "Every change to employee assignment or task status is logged to AuditLog with who/when/why.",
+        "Original ML-detected status is never overwritten by a supervisor override — both remain queryable."
+      ]
+    }
+  ],
+
+  "mvp_in_scope": [
+    "Supervisor authentication and protected app shell",
+    "Multi-step session scheduling form",
+    "Drizzle/PostgreSQL persistence for the core entities, including AuditLog",
+    "Event ingestion, persistence, and broadcast layer",
+    "Python inference service with YOLOv8 and rule-based state machine, including confidence-scored missed/unverifiable classification",
+    "Live dashboard for the two monitored cow positions, with manual override capability",
+    "Statistics page and Word export, distinguishing missed/unverifiable/overridden outcomes",
+    "End-of-session email notification"
+  ],
+  "mvp_out_of_scope": [
+    "Full-row coverage beyond the two monitored cow positions",
+    "Quality verification of cleaning, stripping, and post-dip coverage",
+    "Independent employee identity verification",
+    "Learned temporal modeling as the primary detection strategy",
+    "Employee-facing views and multi-role RBAC",
+    "Decorative 3D visuals before core reliability is stable",
+    "Formal effort/timeline estimation (flagged as a separate required exercise)"
+  ]
+}
