@@ -1,6 +1,7 @@
-import { desc, eq, inArray, and, sql } from "drizzle-orm";
+import { desc, eq, inArray, and } from "drizzle-orm";
 import { db } from "../db/client";
 import { sessions, cowProcesses, taskEvents, reports, auditLog, supervisors, employees } from "../db/schema";
+import { TASK_LABELS } from "../constants";
 
 export type SessionStatus = "scheduled" | "active" | "completed" | "ended_early";
 
@@ -185,63 +186,68 @@ export async function createSession(input: {
   }
 
   const now = new Date();
-  const [inserted] = await db
-    .insert(sessions)
-    .values({
-      supervisor_id: input.supervisor_id,
-      employee_id: input.employee_id,
-      employee_name: input.employee_name,
-      supervisor_name: input.supervisor_name,
-      supervisor_email: input.supervisor_email,
-      scheduled_start_time: new Date(input.scheduled_start_time),
-      estimated_end_time: new Date(input.estimated_end_time),
-      actual_end_time: null,
-      row_1_cow_count: input.row_1_cow_count,
-      row_2_cow_count: input.row_2_cow_count,
-      status: "scheduled",
-      created_at: now,
-      updated_at: now,
-    })
-    .returning();
 
-  if (!inserted) throw new Error("Failed to insert session");
+  const result = await db.transaction(async (tx) => {
+    const [inserted] = await tx
+      .insert(sessions)
+      .values({
+        supervisor_id: input.supervisor_id,
+        employee_id: input.employee_id,
+        employee_name: input.employee_name,
+        supervisor_name: input.supervisor_name,
+        supervisor_email: input.supervisor_email,
+        scheduled_start_time: new Date(input.scheduled_start_time),
+        estimated_end_time: new Date(input.estimated_end_time),
+        actual_end_time: null,
+        row_1_cow_count: input.row_1_cow_count,
+        row_2_cow_count: input.row_2_cow_count,
+        status: "scheduled",
+        created_at: now,
+        updated_at: now,
+      })
+      .returning();
 
-  await db.insert(cowProcesses).values([
-    {
-      session_id: inserted.id,
-      cow_position: 1,
-      detected_start_time: null,
-      detected_end_time: null,
-      overall_status: "in_progress",
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      session_id: inserted.id,
-      cow_position: 2,
-      detected_start_time: null,
-      detected_end_time: null,
-      overall_status: "in_progress",
-      created_at: now,
-      updated_at: now,
-    },
-  ]);
+    if (!inserted) throw new Error("Failed to insert session");
+
+    await tx.insert(cowProcesses).values([
+      {
+        session_id: inserted.id,
+        cow_position: 1,
+        detected_start_time: null,
+        detected_end_time: null,
+        overall_status: "in_progress",
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        session_id: inserted.id,
+        cow_position: 2,
+        detected_start_time: null,
+        detected_end_time: null,
+        overall_status: "in_progress",
+        created_at: now,
+        updated_at: now,
+      },
+    ]);
+
+    return inserted;
+  });
 
   return {
-    id: inserted.id,
-    supervisor_id: inserted.supervisor_id,
-    employee_id: inserted.employee_id,
-    employee_name: inserted.employee_name,
-    supervisor_name: inserted.supervisor_name,
-    supervisor_email: inserted.supervisor_email,
-    scheduled_start_time: toISO(inserted.scheduled_start_time) ?? "",
-    estimated_end_time: toISO(inserted.estimated_end_time) ?? "",
-    actual_end_time: toISO(inserted.actual_end_time),
-    row_1_cow_count: Number(inserted.row_1_cow_count),
-    row_2_cow_count: Number(inserted.row_2_cow_count),
-    status: inserted.status as SessionStatus,
-    created_at: toISO(inserted.created_at) ?? "",
-    updated_at: toISO(inserted.updated_at) ?? "",
+    id: result.id,
+    supervisor_id: result.supervisor_id,
+    employee_id: result.employee_id,
+    employee_name: result.employee_name,
+    supervisor_name: result.supervisor_name,
+    supervisor_email: result.supervisor_email,
+    scheduled_start_time: toISO(result.scheduled_start_time) ?? "",
+    estimated_end_time: toISO(result.estimated_end_time) ?? "",
+    actual_end_time: toISO(result.actual_end_time),
+    row_1_cow_count: Number(result.row_1_cow_count),
+    row_2_cow_count: Number(result.row_2_cow_count),
+    status: result.status as SessionStatus,
+    created_at: toISO(result.created_at) ?? "",
+    updated_at: toISO(result.updated_at) ?? "",
   };
 }
 
@@ -605,15 +611,6 @@ export async function getEmployeeAnalytics(): Promise<EmployeeAnalytics[]> {
 
   return result.sort((a, b) => b.compliance - a.compliance);
 }
-
-const TASK_LABELS: Record<string, string> = {
-  "TASK-01": "Pre-cleaning",
-  "TASK-02": "Stripping",
-  "TASK-03": "Machine attachment",
-  "TASK-04": "Milking",
-  "TASK-05": "Detachment",
-  "TASK-06": "Post-dip",
-};
 
 export async function getTaskAnalytics(): Promise<TaskAnalytics[]> {
   const allTaskEvents = await db.select().from(taskEvents);

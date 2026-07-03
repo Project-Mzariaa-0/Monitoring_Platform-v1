@@ -17,6 +17,8 @@ export default function EquipmentStatus({ services }: { services: Service[] }) {
   const [statuses, setStatuses] = useState<Map<string, ServiceStatus>>(new Map());
 
   useEffect(() => {
+    const controllers: AbortController[] = [];
+
     for (const service of services) {
       if (service.type === "stream" || service.type === "model") {
         setStatuses((prev) => {
@@ -37,25 +39,34 @@ export default function EquipmentStatus({ services }: { services: Service[] }) {
       });
 
       const controller = new AbortController();
+      controllers.push(controller);
       const timeout = setTimeout(() => controller.abort(), 5000);
 
-      fetch(service.url, { method: "HEAD", signal: controller.signal, mode: "no-cors" })
+      fetch(service.url, { method: "GET", signal: controller.signal })
         .then(() => {
-          setStatuses((prev) => {
-            const next = new Map(prev);
-            next.set(service.name, { status: "online", detail: "Reachable" });
-            return next;
-          });
+          if (!controller.signal.aborted) {
+            setStatuses((prev) => {
+              const next = new Map(prev);
+              next.set(service.name, { status: "online", detail: "Reachable" });
+              return next;
+            });
+          }
         })
         .catch(() => {
-          setStatuses((prev) => {
-            const next = new Map(prev);
-            next.set(service.name, { status: "offline", detail: "Unreachable" });
-            return next;
-          });
+          if (!controller.signal.aborted) {
+            setStatuses((prev) => {
+              const next = new Map(prev);
+              next.set(service.name, { status: "offline", detail: "Unreachable" });
+              return next;
+            });
+          }
         })
         .finally(() => clearTimeout(timeout));
     }
+
+    return () => {
+      controllers.forEach((c) => c.abort());
+    };
   }, [services]);
 
   return (
@@ -80,7 +91,7 @@ export default function EquipmentStatus({ services }: { services: Service[] }) {
                 {st?.detail ?? service.url}
               </div>
             </div>
-            <span className={`status-pill ${pillClass}`}>
+            <span className={`status-tag ${pillClass}`}>
               {status === "checking" ? "Checking..." : status === "online" ? "Online" : status === "offline" ? "Offline" : "Unknown"}
             </span>
           </div>

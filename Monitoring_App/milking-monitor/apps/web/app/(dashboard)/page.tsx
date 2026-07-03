@@ -19,31 +19,31 @@ export default async function DashboardPage() {
 
   return (
     <div className="page-grid">
-      <section className="card card-pad dark-panel">
+      <section className="card card-pad accent-panel">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
           <div>
-            <span className="status-pill status-success">
+            <span className="status-tag status-success">
               <span className="live-dot" />
               {session?.status === "active" ? "Active" : "Standby"}
             </span>
-            <h2 style={{ margin: "18px 0 8px", fontFamily: "Manrope, Inter, sans-serif", fontSize: 34 }}>
+            <h2 style={{ margin: "18px 0 8px", fontFamily: "'Schibsted Grotesk', sans-serif", fontSize: 34 }}>
               {session ? `Session ${session.id.slice(0, 8)}` : "No active session"}
             </h2>
-            <p style={{ maxWidth: 680, color: "#c7cdd9", margin: 0 }}>
+            <p style={{ maxWidth: 680, color: "#C9DAD0", margin: 0 }}>
               {session
                 ? `${session.employee_name} is assigned to two monitored positions with live compliance capture.`
                 : "Schedule a session to activate the two-position monitoring grid and realtime alert stream."}
             </p>
           </div>
           <div style={{ minWidth: 220 }}>
-            <div className="label" style={{ color: "#9ca3af" }}>
+            <div className="label" style={{ color: "#9CB3A4" }}>
               Compliance score
             </div>
-            <div className="metric" style={{ color: "var(--accent-bright)" }}>
+            <div className="metric" style={{ color: "#F7F5EF" }}>
               {score}%
             </div>
             <div className="progress-track" style={{ marginTop: 12, background: "rgba(255,255,255,.18)" }}>
-              <div className="progress-fill" style={{ width: `${score}%`, background: "var(--accent-bright)" }} />
+              <div className="progress-fill" style={{ width: `${score}%`, background: "#F7F5EF" }} />
             </div>
           </div>
         </div>
@@ -74,7 +74,7 @@ export default async function DashboardPage() {
                     <span className="label">Cow position {position}</span>
                     <strong>Process compliance</strong>
                   </div>
-                  <span className={`status-pill ${hasViolation ? "status-danger" : "status-success"}`}>
+                  <span className={`status-tag ${hasViolation ? "status-danger" : "status-success"}`}>
                     {hasViolation ? "Violation" : session ? "Milking" : "Standby"}
                   </span>
                 </div>
@@ -89,7 +89,7 @@ export default async function DashboardPage() {
                     return (
                       <div className="check-row" key={taskId}>
                         <span>{TASK_LABELS[taskId]}</span>
-                        <span className={`status-pill ${checked ? "status-success" : "status-neutral"}`}>
+                        <span className={`status-tag ${checked ? "status-success" : "status-neutral"}`}>
                           {checked ? "Checked" : "Pending"}
                         </span>
                       </div>

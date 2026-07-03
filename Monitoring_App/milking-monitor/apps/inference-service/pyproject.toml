@@ -1,0 +1,28 @@
+[project]
+name = "milking-monitor-inference-service"
+version = "0.1.0"
+description = "Real-time milking compliance inference service"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+pythonpath = ["."]
+addopts = "-v --tb=short"
+markers = [
+    "unit: Unit tests (no external dependencies)",
+    "integration: Integration tests (may need services)",
+    "api: API endpoint tests",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]

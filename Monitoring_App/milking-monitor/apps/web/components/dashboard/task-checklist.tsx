@@ -53,7 +53,7 @@ export default function TaskChecklist({ sessionId, taskEvents }: Props) {
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <span
-                className={`status-pill ${
+                className={`status-tag ${
                   row.status === "completed"
                     ? "status-success"
                     : row.status === "missed" || row.status === "anomaly_flagged"

@@ -10,8 +10,22 @@ type Bucket = {
 };
 
 const buckets = new Map<string, Bucket>();
+const CLEANUP_INTERVAL = 60_000;
+let lastCleanup = Date.now();
+
+function cleanup() {
+  const now = Date.now();
+  if (now - lastCleanup < CLEANUP_INTERVAL) return;
+  lastCleanup = now;
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) {
+      buckets.delete(key);
+    }
+  }
+}
 
 export function rateLimit(identifier: string, limit = 60, windowMs = 60_000): RateLimitResult {
+  cleanup();
   const now = Date.now();
   const current = buckets.get(identifier);
 

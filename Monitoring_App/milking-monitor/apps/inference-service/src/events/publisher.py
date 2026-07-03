@@ -29,6 +29,4 @@ class EventPublisher:
                 last_error = error
                 logger.warning("Publish attempt %d failed: %s", attempt + 1, error)
 
-        logger.error("Failed to publish event after 3 attempts: %s", last_error)
-        if last_error is not None:
-            raise last_error
+        logger.error("Failed to publish event after 3 attempts, dropping event: %s", last_error)

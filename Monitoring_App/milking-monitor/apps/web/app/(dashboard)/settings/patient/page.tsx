@@ -1,4 +1,4 @@
-import { getMonitoringOverview, type CowProcessRecord } from "../../../../lib/data/store";
+import { getMonitoringOverview } from "../../../../lib/data/store";
 
 export default async function PatientSettingsPage() {
   const overview = await getMonitoringOverview();
@@ -29,7 +29,7 @@ export default async function PatientSettingsPage() {
                 <td>{cp.session_id.slice(0, 8)}</td>
                 <td>Position {cp.cow_position}</td>
                 <td>
-                  <span className={`status-pill ${cp.overall_status === "completed" ? "status-success" : cp.overall_status === "in_progress" ? "status-warning" : "status-neutral"}`}>
+                  <span className={`status-tag ${cp.overall_status === "completed" ? "status-success" : cp.overall_status === "in_progress" ? "status-warning" : "status-neutral"}`}>
                     {cp.overall_status}
                   </span>
                 </td>

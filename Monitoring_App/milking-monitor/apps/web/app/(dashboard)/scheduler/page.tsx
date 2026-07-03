@@ -46,7 +46,7 @@ export default async function SchedulerPage() {
                   <td>{session.employee_name}</td>
                   <td>{session.row_1_cow_count + session.row_2_cow_count} cows</td>
                   <td>
-                    <span className={`status-pill ${session.status === "active" ? "status-success" : "status-neutral"}`}>{session.status}</span>
+                    <span className={`status-tag ${session.status === "active" ? "status-success" : "status-neutral"}`}>{session.status}</span>
                   </td>
                   <td>
                     <Link className="button button-secondary" href={`/sessions/${session.id}`}>

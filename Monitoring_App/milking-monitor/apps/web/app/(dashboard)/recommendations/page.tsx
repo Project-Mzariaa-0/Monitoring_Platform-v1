@@ -1,5 +1,5 @@
 import { getMonitoringOverview, getStatistics } from "../../../lib/data/store";
-import { complianceScore, complianceLabel, COMPLIANCE_ANALYTICS_PENALTY } from "../../../lib/constants";
+import { complianceScore } from "../../../lib/constants";
 
 export default async function RecommendationsPage() {
   const [overview, statistics] = await Promise.all([getMonitoringOverview(), getStatistics()]);

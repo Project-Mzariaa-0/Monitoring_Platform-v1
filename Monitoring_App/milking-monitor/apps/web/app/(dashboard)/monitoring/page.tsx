@@ -37,7 +37,7 @@ export default async function MonitoringPage() {
       </section>
 
       <section className="card card-pad">
-        <div className="page-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <div className="grid-2">
           {[1, 2].map((position) => {
             const tasks = position === 1 ? position1Tasks : position2Tasks;
             const cowProcess = overview.activeCowProcesses.find((c) => c.cow_position === position);

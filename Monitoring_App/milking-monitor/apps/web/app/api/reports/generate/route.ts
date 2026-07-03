@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "fs/promises";
+import { join } from "path";
 import { createReport, getSessionDetails } from "../../../../lib/data/store";
 import { generateReportSchema } from "../../../../lib/validation/report";
 import { generateDocxReport } from "../../../../lib/reporting/docx-generator";
@@ -21,20 +23,30 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "Session not found" }, { status: 404 });
   }
 
-  const docxBuffer = await generateDocxReport(details);
+  try {
+    const docxBuffer = await generateDocxReport(details);
 
-  const report = await createReport(parsed.data.session_id, `/reports/${parsed.data.session_id}.docx`);
+    const reportsDir = join(process.cwd(), "public", "reports");
+    await mkdir(reportsDir, { recursive: true });
+    const filePath = join(reportsDir, `${parsed.data.session_id}.docx`);
+    await writeFile(filePath, Buffer.from(docxBuffer));
 
-  return Response.json({
-    ok: true,
-    route: "reports:generate",
-    data: {
-      report: {
-        id: report.id,
-        session_id: report.session_id,
-        docx_file_url: report.docx_file_url,
-        generated_at: report.generated_at,
+    const report = await createReport(parsed.data.session_id, `/reports/${parsed.data.session_id}.docx`);
+
+    return Response.json({
+      ok: true,
+      route: "reports:generate",
+      data: {
+        report: {
+          id: report.id,
+          session_id: report.session_id,
+          docx_file_url: report.docx_file_url,
+          generated_at: report.generated_at,
+        },
       },
-    },
-  }, { status: 201 });
+    }, { status: 201 });
+  } catch (error) {
+    console.error("[reports] generation failed:", error);
+    return Response.json({ ok: false, error: "Report generation failed" }, { status: 500 });
+  }
 }

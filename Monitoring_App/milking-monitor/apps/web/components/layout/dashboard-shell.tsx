@@ -5,13 +5,13 @@ import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 
 const navItems = [
-  { href: "/", label: "Dashboard", icon: "D" },
-  { href: "/live", label: "Live View", icon: "L" },
-  { href: "/logs", label: "Unit Logs", icon: "U" },
-  { href: "/equipment", label: "Equipment", icon: "E" },
-  { href: "/analytics", label: "Analytics", icon: "A" },
-  { href: "/scheduler", label: "Scheduler", icon: "S" },
-  { href: "/settings", label: "Settings", icon: "C" },
+  { href: "/", label: "Overview" },
+  { href: "/live", label: "Live View" },
+  { href: "/logs", label: "Audit Log" },
+  { href: "/equipment", label: "Equipment" },
+  { href: "/analytics", label: "Analytics" },
+  { href: "/scheduler", label: "Scheduler" },
+  { href: "/settings", label: "Settings" },
 ];
 
 function pageTitle(pathname: string) {
@@ -58,12 +58,10 @@ export default function DashboardShell({ children }: { children: React.ReactNode
           </span>
         </Link>
 
+        <span className="small-muted" style={{ paddingLeft: 8 }}>Dashboard</span>
         <nav className="side-nav" aria-label="Primary navigation">
           {navItems.map((item) => (
             <Link key={item.href} href={item.href} className={isActive(pathname, item.href) ? "active" : undefined}>
-              <span className="nav-icon" aria-hidden="true">
-                {item.icon}
-              </span>
               <span>{item.label}</span>
             </Link>
           ))}
@@ -88,7 +86,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
                 style={{
                   background: "transparent",
                   border: "none",
-                  color: "#ff6b6b",
+                  color: "#E4E0D2",
                   cursor: "pointer",
                   fontSize: "11px",
                   padding: "0",
@@ -107,7 +105,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
           <div>
             <h1 className="page-title">{pageTitle(pathname)}</h1>
             <div className="small-muted" style={{ marginTop: 6 }}>
-              Industrial milking compliance monitoring
+              Cooperative Dairy Unit
             </div>
           </div>
           <div className="topbar-tools">

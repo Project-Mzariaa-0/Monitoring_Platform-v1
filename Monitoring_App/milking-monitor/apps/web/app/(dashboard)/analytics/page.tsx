@@ -1,3 +1,4 @@
+import Link from "next/link";
 import ReportGenerator from "../../../components/reports/report-generator";
 import { getMonitoringOverview, getStatistics, getEmployeeAnalytics, getTaskAnalytics } from "../../../lib/data/store";
 import { complianceScore, complianceLabel } from "../../../lib/constants";
@@ -30,17 +31,13 @@ export default async function AnalyticsPage() {
         <article className="card card-pad">
           <h2 className="section-title">System Compliance Score</h2>
           <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
-            <div className="donut" style={{ background: `conic-gradient(var(--accent-bright) 0 ${score}%, #e5e7eb ${score}% 100%)` }}>
-              <div className="donut-inner">
-                <div style={{ textAlign: "center" }}>
-                  <div className="metric" style={{ fontSize: 36 }}>
-                    {score}%
-                  </div>
-                  <span className={`status-pill ${score >= 90 ? "status-success" : score >= 75 ? "status-warning" : "status-danger"}`}>
-                    {status}
-                  </span>
-                </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, minWidth: 140 }}>
+              <div className="metric" style={{ fontSize: 36 }}>
+                {score}%
               </div>
+              <span className={`status-tag ${score >= 90 ? "status-success" : score >= 75 ? "status-warning" : "status-danger"}`}>
+                {status}
+              </span>
             </div>
             <div>
               <div className="data-row">
@@ -118,7 +115,7 @@ export default async function AnalyticsPage() {
                     <td>{emp.compliance}%</td>
                     <td>{emp.avg_duration_seconds > 0 ? `${Math.floor(emp.avg_duration_seconds / 60)}m ${emp.avg_duration_seconds % 60}s` : "N/A"}</td>
                     <td>
-                      <span className={`status-pill ${emp.status === "Review Req." ? "status-warning" : "status-success"}`}>{emp.status}</span>
+                      <span className={`status-tag ${emp.status === "Review Req." ? "status-warning" : "status-success"}`}>{emp.status}</span>
                     </td>
                   </tr>
                 ))}
@@ -128,17 +125,19 @@ export default async function AnalyticsPage() {
         </article>
       </section>
 
-      <section className="card card-pad dark-panel">
+      <section className="card card-pad accent-panel">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
           <div>
-            <h2 className="section-title" style={{ color: "#fff" }}>
+            <h2 className="section-title" style={{ color: "#F7F5EF" }}>
               Predictive Compliance Logic
             </h2>
-            <p style={{ color: "#c7cdd9", margin: 0, maxWidth: 680 }}>
+            <p style={{ color: "#C9DAD0", margin: 0, maxWidth: 680 }}>
               Post-dip drift is trending above threshold on faster cycles. Review protocol timing before the next peak window.
             </p>
           </div>
-          <button className="button button-secondary">Review Protocol Changes</button>
+          <Link className="button button-secondary" href="/logs">
+            Review Protocol Changes
+          </Link>
         </div>
       </section>
     </div>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 
 from src.detection.yolo_detector import YoloDetector
@@ -13,6 +14,9 @@ from src.state_machine.cow_process_boundary import CowProcessBoundaryDetector
 from src.state_machine.task_state_machine import TaskStateMachine
 
 logger = logging.getLogger(__name__)
+
+TARGET_FPS = 5
+FRAME_INTERVAL = 1.0 / TARGET_FPS
 
 
 @dataclass
@@ -28,6 +32,9 @@ class SessionRunner:
 
     def run(self) -> None:
         logger.info("Session %s: starting inference pipeline", self.session_id)
+        frame_count = 0
+        reader = None
+        publisher = None
         try:
             reader = RtspReader(self.stream_url)
             detector = YoloDetector(self.weights_path)
@@ -35,11 +42,12 @@ class SessionRunner:
             boundary_detector = CowProcessBoundaryDetector(self.thresholds)
             publisher = EventPublisher(self.ingest_url, self.ingest_token)
 
-            frame_count = 0
             for frame_index, frame in reader.read_frames():
                 if self.stop_event.is_set():
                     logger.info("Session %s: stop signal received after %d frames", self.session_id, frame_count)
                     break
+
+                loop_start = time.monotonic()
 
                 roi_frames = split_frame_into_rois(frame, self.rois)
                 for cow_position, roi_frame in roi_frames.items():
@@ -53,8 +61,14 @@ class SessionRunner:
                 if frame_count % 100 == 0:
                     logger.info("Session %s: processed %d frames", self.session_id, frame_count)
 
+                elapsed = time.monotonic() - loop_start
+                if elapsed < FRAME_INTERVAL:
+                    time.sleep(FRAME_INTERVAL - elapsed)
+
         except Exception:
             logger.exception("Session %s: inference pipeline failed", self.session_id)
+        finally:
+            logger.info("Session %s: pipeline stopped after %d frames", self.session_id, frame_count)
 
     def stop(self) -> None:
         self.stop_event.set()

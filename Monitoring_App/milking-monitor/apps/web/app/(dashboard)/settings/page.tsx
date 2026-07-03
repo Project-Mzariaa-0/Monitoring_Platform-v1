@@ -34,14 +34,14 @@ export default async function SettingsPage() {
         <input className="input" type="range" min="20" max="60" defaultValue="32" />
         <div className="data-row">
           <span>Notification stream</span>
-          <span className="status-pill status-success">
+          <span className="status-tag status-success">
             <span className="live-dot" />
             Enabled
           </span>
         </div>
         <div className="data-row">
           <span>Critical alert escalation</span>
-          <span className="status-pill status-success">Live</span>
+          <span className="status-tag status-success">Live</span>
         </div>
       </section>
     </div>

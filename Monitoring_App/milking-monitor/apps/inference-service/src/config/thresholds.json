@@ -1,5 +1,11 @@
 {
   "default_missed_task_seconds": 180,
   "default_unverifiable_confidence": 0.5,
-  "default_completeness_confidence": 0.7
+  "default_completeness_confidence": 0.7,
+  "TASK-01": { "confidence": 0.82 },
+  "TASK-02": { "confidence": 0.78 },
+  "TASK-03": { "confidence": 0.96 },
+  "TASK-04": { "confidence": 0.91 },
+  "TASK-05": { "confidence": 0.95 },
+  "TASK-06": { "confidence": 0.80 }
 }

@@ -25,10 +25,10 @@ export default function SignUpPage() {
           <span className="label" style={{ color: "#c7cdd9" }}>
             Unit readiness
           </span>
-          <div className="metric" style={{ color: "var(--accent-bright)", margin: "10px 0" }}>
+          <div className="metric" style={{ color: "#F7F5EF", margin: "10px 0" }}>
             98%
           </div>
-          <span className="status-pill status-success">Ready</span>
+          <span className="status-tag status-success">Ready</span>
         </div>
       </section>
     </div>

@@ -65,7 +65,7 @@ export default function MultiStepSessionForm() {
 
   return (
     <div className="page-grid">
-      <div style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+      <div style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 12 }}>
         {steps.map((step, index) => (
           <button
             key={step}
@@ -85,7 +85,7 @@ export default function MultiStepSessionForm() {
                 display: "grid",
                 placeItems: "center",
                 borderRadius: 999,
-                background: index === activeStep ? "var(--accent-bright)" : "var(--neutral-soft)",
+                background: index === activeStep ? "var(--accent)" : "var(--neutral-soft)",
                 color: "var(--sidebar-bg)",
               }}
             >
@@ -164,7 +164,7 @@ export default function MultiStepSessionForm() {
           {activeStep === steps.length - 1 ? "Confirm Session" : "Continue ->"}
         </button>
       </div>
-      {result ? <div className="status-pill status-success">{result}</div> : null}
+      {result ? <div className="status-tag status-success">{result}</div> : null}
     </div>
   );
 }

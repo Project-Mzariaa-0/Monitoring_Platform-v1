@@ -25,10 +25,10 @@ export default function SignInPage() {
           <span className="label" style={{ color: "#c7cdd9" }}>
             Live compliance score
           </span>
-          <div className="metric" style={{ color: "var(--accent-bright)", margin: "10px 0" }}>
+          <div className="metric" style={{ color: "#F7F5EF", margin: "10px 0" }}>
             96%
           </div>
-          <span className="status-pill status-success">Optimal</span>
+          <span className="status-tag status-success">Optimal</span>
         </div>
       </section>
     </div>

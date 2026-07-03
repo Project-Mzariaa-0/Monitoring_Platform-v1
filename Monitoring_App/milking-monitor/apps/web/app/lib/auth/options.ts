@@ -100,6 +100,11 @@ export const authOptions: NextAuthOptions = {
 
           // Auto-register user during local testing for convenience
           if (!existingUser) {
+            // In production, reject unknown users. Auto-register only in development.
+            if (process.env.NODE_ENV === "production") {
+              throw new Error("No account found. Please sign up first.");
+            }
+
             const now = new Date();
             const userId = crypto.randomUUID ? crypto.randomUUID() : `user_${Date.now()}`;
             const passwordHash = hashPassword(password);

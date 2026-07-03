@@ -14,7 +14,7 @@ export default function EquipmentPage() {
     },
     {
       name: "Event Ingestion",
-      url: `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/api/events/ingest`,
+      url: process.env.NEXTAUTH_URL || "http://localhost:3000",
       type: "api" as const,
     },
     {
@@ -38,21 +38,21 @@ export default function EquipmentPage() {
               <strong>Database</strong>
               <div className="muted" style={{ fontSize: 13 }}>PostgreSQL 16</div>
             </div>
-            <span className="status-pill status-success">Connected</span>
+            <span className="status-tag status-success">Connected</span>
           </div>
           <div className="data-row">
             <div>
               <strong>Authentication</strong>
               <div className="muted" style={{ fontSize: 13 }}>NextAuth.js · JWT strategy</div>
             </div>
-            <span className="status-pill status-success">Active</span>
+            <span className="status-tag status-success">Active</span>
           </div>
           <div className="data-row">
             <div>
               <strong>Email Service</strong>
               <div className="muted" style={{ fontSize: 13 }}>{process.env.RESEND_API_KEY ? "Resend configured" : "Not configured"}</div>
             </div>
-            <span className={`status-pill ${process.env.RESEND_API_KEY ? "status-success" : "status-warning"}`}>
+            <span className={`status-tag ${process.env.RESEND_API_KEY ? "status-success" : "status-warning"}`}>
               {process.env.RESEND_API_KEY ? "Ready" : "No API key"}
             </span>
           </div>
@@ -61,7 +61,7 @@ export default function EquipmentPage() {
               <strong>Realtime Events</strong>
               <div className="muted" style={{ fontSize: 13 }}>Server-Sent Events</div>
             </div>
-            <span className="status-pill status-success">Active</span>
+            <span className="status-tag status-success">Active</span>
           </div>
         </div>
       </section>

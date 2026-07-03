@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { listSessions, getSessionDetails } from "../../../lib/data/store";
 import { TASK_LABELS } from "../../../lib/constants";
 
@@ -38,7 +39,7 @@ export default async function LogsPage() {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {["All", "Critical", "Warning"].map((filter) => (
-              <span className="status-pill status-neutral" key={filter}>
+              <span className="status-tag status-neutral" key={filter}>
                 {filter}
               </span>
             ))}
@@ -68,7 +69,7 @@ export default async function LogsPage() {
               logRows.map((row) => (
                 <tr key={row.id}>
                   <td>
-                    <span className={`status-pill ${row.severity === "critical" ? "status-danger" : "status-warning"}`}>
+                    <span className={`status-tag ${row.severity === "critical" ? "status-danger" : "status-warning"}`}>
                       {row.severity === "critical" ? "Critical" : "Warning"}
                     </span>
                   </td>
@@ -77,9 +78,9 @@ export default async function LogsPage() {
                   <td>{new Date(row.timestamp).toLocaleString()}</td>
                   <td>{row.employee_name}</td>
                   <td>
-                    <a className="button button-secondary" href={`/sessions/${row.session_id}`}>
+                    <Link className="button button-secondary" href={`/sessions/${row.session_id}`}>
                       Review
-                    </a>
+                    </Link>
                   </td>
                 </tr>
               ))

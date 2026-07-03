@@ -17,9 +17,10 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Inference Service")
 
+ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,6 +28,7 @@ app.add_middleware(
 
 active_runners: dict[str, SessionRunner] = {}
 active_threads: dict[str, threading.Thread] = {}
+_runner_lock = threading.Lock()
 
 
 class SessionWindowPayload(BaseModel):
@@ -64,8 +66,9 @@ def list_active_sessions() -> dict[str, list[str]]:
 def receive_session_window(payload: SessionWindowPayload) -> dict[str, str]:
     logger.info("Received session window for session %s", payload.session_id)
 
-    if payload.session_id in active_runners:
-        raise HTTPException(status_code=409, detail=f"Session {payload.session_id} is already running")
+    with _runner_lock:
+        if payload.session_id in active_runners:
+            raise HTTPException(status_code=409, detail=f"Session {payload.session_id} is already running")
 
     stream_url = os.getenv("RTSP_STREAM_URL")
     if not stream_url:
@@ -77,8 +80,11 @@ def receive_session_window(payload: SessionWindowPayload) -> dict[str, str]:
         raise HTTPException(status_code=400, detail="WEB_APP_INGEST_URL and WEB_APP_INGEST_TOKEN are required")
 
     weights_path = os.getenv("MODEL_WEIGHTS_PATH", "yolov8n.pt")
-    rois = get_rois()
-    thresholds = get_thresholds()
+    try:
+        rois = get_rois()
+        thresholds = get_thresholds()
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        raise HTTPException(status_code=400, detail=f"Configuration error: {e}")
 
     runner = SessionRunner(
         session_id=payload.session_id,
@@ -91,8 +97,9 @@ def receive_session_window(payload: SessionWindowPayload) -> dict[str, str]:
     )
 
     thread = threading.Thread(target=runner.run, daemon=True)
-    active_runners[payload.session_id] = runner
-    active_threads[payload.session_id] = thread
+    with _runner_lock:
+        active_runners[payload.session_id] = runner
+        active_threads[payload.session_id] = thread
     thread.start()
 
     logger.info("Started inference for session %s", payload.session_id)
@@ -119,19 +126,19 @@ def test_send_events(payload: SessionWindowPayload) -> dict[str, str]:
     ]
 
     sent = 0
-    for task_id, status, confidence, cow_pos in tasks:
-        event = {
-            "session_id": payload.session_id,
-            "event_type": "task_event",
-            "task_id": task_id,
-            "cow_position": cow_pos,
-            "status": "completed",
-            "confidence_score": confidence,
-            "detected_start_time": "2026-07-03T12:00:00Z",
-            "detected_end_time": "2026-07-03T12:00:10Z",
-            "duration_seconds": 10,
-        }
-        with httpx.Client(timeout=5.0) as client:
+    with httpx.Client(timeout=5.0) as client:
+        for task_id, status, confidence, cow_pos in tasks:
+            event = {
+                "session_id": payload.session_id,
+                "event_type": "task_event",
+                "task_id": task_id,
+                "cow_position": cow_pos,
+                "status": "completed",
+                "confidence_score": confidence,
+                "detected_start_time": "2026-07-03T12:00:00Z",
+                "detected_end_time": "2026-07-03T12:00:10Z",
+                "duration_seconds": 10,
+            }
             response = client.post(
                 ingest_url,
                 json=event,
@@ -153,7 +160,8 @@ def stop_session_window(session_id: str) -> dict[str, str]:
         raise HTTPException(status_code=404, detail="Session runner not found")
 
     runner.stop()
-    active_runners.pop(session_id, None)
-    active_threads.pop(session_id, None)
+    with _runner_lock:
+        active_runners.pop(session_id, None)
+        active_threads.pop(session_id, None)
     logger.info("Stopped inference for session %s", session_id)
     return {"status": "stopping", "session_id": session_id}

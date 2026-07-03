@@ -50,7 +50,7 @@ export default function LiveSessionStream({ sessionId, initialEvents = [] }: { s
           <div className="muted">Waiting for inference events...</div>
         ) : (
           events.map((event, index) => (
-            <article key={`${event.type}-${index}`} className="card card-pad" style={{ background: "#fafafa" }}>
+            <article key={`${event.type}-${index}`} className="card card-pad" style={{ background: "#FBFAF6" }}>
               <div className="muted" style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase" }}>
                 {event.type}
               </div>

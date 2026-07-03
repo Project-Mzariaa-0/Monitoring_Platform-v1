@@ -49,7 +49,7 @@ export default async function LivePage() {
                     <span className="label">Position {position}</span>
                     <strong>Camera feed</strong>
                   </div>
-                  <span className={`status-pill ${hasViolation ? "status-danger" : "status-success"}`}>
+                  <span className={`status-tag ${hasViolation ? "status-danger" : "status-success"}`}>
                     {hasViolation ? "Violation" : overview.activeSession ? "Milking" : "Standby"}
                   </span>
                 </div>
@@ -82,15 +82,15 @@ export default async function LivePage() {
                         <span>
                           <strong>{taskId}</strong> · {TASK_LABELS[taskId]}
                         </span>
-                        <span className={`status-pill ${pillClass}`}>{statusLabel}</span>
+                        <span className={`status-tag ${pillClass}`}>{statusLabel}</span>
                       </div>
                     );
                   })}
                 </div>
                 {hasViolation ? (
-                  <button className="button button-danger" style={{ width: "100%", marginTop: 14 }}>
-                    Override & Flag Incident
-                  </button>
+                  <div className="muted" style={{ marginTop: 14, fontSize: 13 }}>
+                    Violation flagged — review in audit log
+                  </div>
                 ) : null}
               </article>
             );

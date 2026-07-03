@@ -25,7 +25,11 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "Rate limit exceeded" }, { status: 429, headers: { "Retry-After": String(Math.ceil((limit.resetAt - Date.now()) / 1000)) } });
   }
 
-  if (expectedToken && authorization !== `Bearer ${expectedToken}`) {
+  if (!expectedToken) {
+    return Response.json({ ok: false, error: "Server misconfiguration: INFERENCE_SERVICE_TOKEN not set" }, { status: 500 });
+  }
+
+  if (authorization !== `Bearer ${expectedToken}`) {
     return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
