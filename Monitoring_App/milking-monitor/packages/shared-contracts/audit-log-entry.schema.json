@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AuditLogEntry",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "entity_type": { "type": "string" },
+    "entity_id": { "type": "string" },
+    "action": { "type": "string" },
+    "actor_id": { "type": "string" },
+    "reason": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "required": ["entity_type", "entity_id", "action", "actor_id", "created_at"]
+}

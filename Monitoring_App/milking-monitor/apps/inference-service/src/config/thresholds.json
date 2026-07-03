@@ -1,0 +1,5 @@
+{
+  "default_missed_task_seconds": 180,
+  "default_unverifiable_confidence": 0.5,
+  "default_completeness_confidence": 0.7
+}

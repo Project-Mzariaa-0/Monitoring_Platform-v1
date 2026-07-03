@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TaskEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "enum": ["TASK-01", "TASK-02", "TASK-03", "TASK-04", "TASK-05", "TASK-06"]
+    },
+    "session_id": { "type": "string" },
+    "cow_position": { "type": "integer", "enum": [1, 2] },
+    "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "missed", "unverifiable"]
+    },
+    "detected_start_time": { "type": "string", "format": "date-time" },
+    "detected_end_time": { "type": "string", "format": "date-time" }
+  },
+  "required": [
+    "task_id",
+    "session_id",
+    "cow_position",
+    "confidence_score",
+    "status",
+    "detected_start_time",
+    "detected_end_time"
+  ]
+}

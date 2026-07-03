@@ -1,0 +1,68 @@
+{
+  "sessions": [
+    {
+      "id": "session-1042",
+      "supervisor_id": "supervisor-1",
+      "employee_id": "employee-1",
+      "employee_name": "Oumar Diarra",
+      "supervisor_name": "Nora Smith",
+      "supervisor_email": "nora.smith@farm.com",
+      "scheduled_start_time": "2026-07-02T12:50:20.482Z",
+      "estimated_end_time": "2026-07-02T13:45:20.483Z",
+      "actual_end_time": null,
+      "row_1_cow_count": 12,
+      "row_2_cow_count": 12,
+      "status": "active",
+      "created_at": "2026-07-02T12:40:20.483Z",
+      "updated_at": "2026-07-02T13:10:20.483Z"
+    }
+  ],
+  "cowProcesses": [
+    {
+      "id": "cow-process-1",
+      "session_id": "session-1042",
+      "cow_position": 1,
+      "detected_start_time": "2026-07-02T12:52:20.483Z",
+      "detected_end_time": null,
+      "overall_status": "in_progress"
+    },
+    {
+      "id": "cow-process-2",
+      "session_id": "session-1042",
+      "cow_position": 2,
+      "detected_start_time": "2026-07-02T12:54:20.483Z",
+      "detected_end_time": null,
+      "overall_status": "completed_with_missed_tasks"
+    }
+  ],
+  "taskEvents": [
+    {
+      "id": "task-event-1",
+      "cow_process_id": "cow-process-1",
+      "task_id": "TASK-01",
+      "detected_start_time": "2026-07-02T12:53:20.483Z",
+      "detected_end_time": "2026-07-02T12:53:45.483Z",
+      "duration_seconds": 25,
+      "status": "completed"
+    },
+    {
+      "id": "task-event-2",
+      "cow_process_id": "cow-process-2",
+      "task_id": "TASK-06",
+      "detected_start_time": null,
+      "detected_end_time": null,
+      "duration_seconds": 0,
+      "status": "missed"
+    }
+  ],
+  "auditLog": [],
+  "reports": [
+    {
+      "id": "report-1",
+      "session_id": "session-1042",
+      "generated_at": "2026-07-02T13:08:20.483Z",
+      "docx_file_url": "/reports/session-1042.docx",
+      "email_sent_at": "2026-07-02T13:09:20.483Z"
+    }
+  ]
+}

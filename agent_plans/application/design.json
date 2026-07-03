@@ -1,0 +1,252 @@
+{
+  "project": "Milking Monitor Platform — Redesign Spec",
+  "designIntent": "Production-grade, niche minimalistic SaaS dashboard. No mock/random components, no 'student project' feel. Every screen must read like a real industrial compliance product: dense, calm, high-contrast, purposeful whitespace. Reference: dark navy sidebar + mint accent compliance dashboard (Live View / Scheduler / Analytics) and the dark-green split-screen auth screen for sign-in/sign-up.",
+  "frontend": {
+    "framework": "Next.js 15.5.20 (App Router)",
+    "language": "TypeScript",
+    "packageManager": "npm",
+    "styling": "Vanilla CSS with CSS Custom Properties (design tokens) — no Tailwind",
+    "authentication": "Clerk (Next.js integration), custom-themed to match brand, not default Clerk UI",
+    "database": "PostgreSQL via Drizzle ORM (7 tables) — replace JSON file store with real DB reads/writes",
+    "realTime": "Server-Sent Events (EventSource) via /api/ws",
+    "fonts": "Inter (body/UI), Manrope (headings, metrics, brand wordmark)"
+  },
+  "designSystem": {
+    "principle": "One dark surface (sidebar + hero/CTA elements), one light surface (app canvas + cards). Mint/teal is the ONLY accent color used for active states, primary data, and success. Everything else is grayscale + semantic red/amber for alerts.",
+    "colorPalette": {
+      "canvas": "#f7f8fa",
+      "surface": "#ffffff",
+      "sidebarBg": "#0f1729",
+      "sidebarText": "#c7cdd9",
+      "sidebarActiveBg": "#3ee8b5",
+      "sidebarActiveText": "#0f1729",
+      "textPrimary": "#111827",
+      "textSecondary": "#6b7280",
+      "textMuted": "#9ca3af",
+      "border": "#e5e7eb",
+      "accent": "#0f7a52",
+      "accentSoft": "#e6f7f0",
+      "accentBright": "#3ee8b5",
+      "primaryButtonBg": "#0f1729",
+      "primaryButtonHover": "#1c2a45",
+      "danger": "#ba1a1a",
+      "dangerSoft": "#fdecec",
+      "warning": "#f59e0b",
+      "warningSoft": "#fef3e2",
+      "success": "#0f7a52",
+      "successSoft": "#e6f7f0",
+      "authGradient": "radial-gradient(circle at 30% 20%, #0d3d2c 0%, #06110d 80%)"
+    },
+    "borderRadius": {
+      "card": "16px",
+      "button": "10px",
+      "input": "8px",
+      "pill": "999px"
+    },
+    "shadows": {
+      "card": "0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06)",
+      "elevated": "0 4px 12px rgba(16, 24, 40, 0.08)"
+    },
+    "spacing": "8px base unit, 24px page gutter, 16px card gutter",
+    "typography": {
+      "wordmark": "Manrope 700, 20px",
+      "pageTitle": "Manrope 700, 28px",
+      "sectionTitle": "Manrope 700, 16-18px",
+      "metric": "Manrope 800, 40px, tight letter-spacing",
+      "label": "Inter 600, 11px, uppercase, letter-spacing 0.06em, textMuted",
+      "body": "Inter 400/500, 14px",
+      "small": "Inter 400, 12px"
+    },
+    "iconography": "Lucide icons only, 18-20px stroke width 1.75, no filled emoji-style icons",
+    "animations": {
+      "livePulse": "pulse-dot 2s ease-in-out infinite (used ONLY on true live/active session indicators)",
+      "transition": "180ms ease for hover/focus, 300ms ease for panel/modal transitions"
+    },
+    "antiPatterns": [
+      "No purple/blue gradients unrelated to brand",
+      "No drop-shadow-heavy skeuomorphism",
+      "No mixed languages on the same surface — all UI copy in English unless locale switch is explicitly built",
+      "No placeholder/mock data left visible in production build — empty states must be designed, not blank"
+    ]
+  },
+  "routing": {
+    "middleware": "Clerk middleware protecting all routes except /sign-in* and /sign-up*. Fix known conflict: keep ONLY the catch-all routes app/sign-in/[[...sign-in]] and app/sign-up/[[...sign-up]]; remove the duplicate (auth) group pages.",
+    "postAuthRedirect": "afterSignInUrl='/' and afterSignUpUrl='/' so both flows land on the Dashboard",
+    "groups": {
+      "(auth)": {
+        "paths": ["/sign-in", "/sign-up"],
+        "layout": "Full-bleed two-pane split screen, no app shell, no sidebar/topbar"
+      },
+      "(dashboard)": {
+        "paths": [
+          "/",
+          "/live",
+          "/logs",
+          "/equipment",
+          "/analytics",
+          "/scheduler",
+          "/scheduler/new",
+          "/sessions/[sessionId]",
+          "/settings",
+          "/settings/patient"
+        ],
+        "layout": "Persistent dark sidebar (fixed width 260px) + light canvas with top bar (page title, global search, notification bell, alerts icon, help icon, emergency-stop button on data-heavy pages)"
+      }
+    },
+    "removedOrMerged": [
+      "/pressure placeholder removed — merged into /live as the two-position monitoring grid",
+      "/recommendations merged into session detail as a 'Clinical Guidance' panel, not a standalone nav item",
+      "/reports renamed /logs conceptually but keeps DOCX generation; report list becomes 'Unit Logs' export panel"
+    ]
+  },
+  "pages": {
+    "/sign-in": {
+      "reference": "Image 1 — split screen, wordmark top-left, 'Welcome back' heading, email/password fields with 8px-radius inputs, dark full-width primary button, link to sign-up below",
+      "leftPane": "White background, brand wordmark, Clerk <SignIn/> restyled via appearance prop to match input/button tokens above",
+      "rightPane": "Dark gradient (authGradient) panel with large Manrope display headline about compliance/monitoring value prop, and a floating summary card mimicking the app's live compliance score (mint ring, %, 'OPTIMAL' pill) instead of a payments card"
+    },
+    "/sign-up": {
+      "reference": "Image 1, 'Get Started' variant",
+      "same layout as sign-in": true,
+      "fields": "Clerk <SignUp/> — email, password, org/unit name if multi-tenant"
+    },
+    "/": {
+      "name": "Dashboard (Supervisor Overview)",
+      "reference": "Image 2 layout pattern adapted for a landing/overview instead of pure live view",
+      "components": ["ActiveSessionHero", "MetricStrip (Sessions today / Active alerts / Missed tasks)", "TwoPositionMiniGrid", "RecentAlertsLog"],
+      "dataSource": "getMonitoringOverview() from DB"
+    },
+    "/live": {
+      "name": "Live View",
+      "reference": "Image 2 exactly — top bar tabs (Live View / Unit Logs / Equipment), Active Session hero bar with elapsed timer, two POSITION cards each with camera feed thumbnail + PROCESS COMPLIANCE checklist (TASK-01..06 renamed Pre-cleaning/Stripping/Machine attachment/Milking/Detachment/Post-dip), status badges (checked/skipped/pending/in-progress spinner), OVERRIDE & FLAG INCIDENT button on violation state, right-hand Recent Alerts Log panel with compliance score gauge/progress bar at bottom",
+      "components": ["LiveSessionBanner", "PositionMonitorCard x2", "TaskChecklist", "OverrideModal", "RecentAlertsLog", "LiveSessionStream (SSE)"],
+      "realTime": true,
+      "dataSource": "getSessionDetails() + /api/ws?session_id="
+    },
+    "/logs": {
+      "name": "Unit Logs",
+      "description": "Replaces old /alerts — full alert/audit history table: severity, cow ID, task, timestamp, clip link, dismiss/override actions. Filter by severity/date/employee.",
+      "components": ["LogsTable", "SeverityFilterBar"]
+    },
+    "/equipment": {
+      "name": "Equipment",
+      "description": "Sensor/camera health, inference-service connection status (was 'SystemStatusCard' on /monitoring), calibration log, model version + accuracy badge",
+      "components": ["SystemStatusCard", "SensorHealthList"]
+    },
+    "/analytics": {
+      "name": "Analytics",
+      "reference": "Image 4 exactly — reporting period + cow position filter + 'Download Full Report (.docx)' button in top bar, System Compliance Score donut (mint ring, %, OPTIMAL/AT RISK/CRITICAL pill), Missed Task Frequency stacked bar chart (Completed mint / Missed amber) per task type, Operational Efficiency horizontal bar list (avg task duration vs benchmark), Human Factors staff compliance table (employee, compliance %, avg speed, status pill: TOP PERFORMER/STABLE/REVIEW REQ./HIGH SPEED), dark 'Predictive Compliance Logic' insight banner at bottom with CTA",
+      "components": ["ComplianceScoreDonut", "MissedTaskBarChart", "EfficiencyBarList", "StaffComplianceTable", "PredictiveInsightBanner", "ReportGenerator"],
+      "dataSource": "getStatistics()"
+    },
+    "/scheduler": {
+      "name": "Scheduler",
+      "description": "List of upcoming/past sessions in NavCard rows, primary 'New Session' button (dark, top of sidebar as in Image 3)",
+      "components": ["SessionListTable"]
+    },
+    "/scheduler/new": {
+      "name": "Schedule New Session",
+      "reference": "Image 3 exactly — numbered step pills (1 Timing / 2 Herd Details / 3 Assignment / 4 Review) with connecting line, dark filled circle for active step, light gray circles for upcoming steps, card body with labeled inputs (uppercase label style), inline info callout with left accent border, single right-aligned 'Continue →' primary button",
+      "components": ["MultiStepSessionForm", "StepIndicator"],
+      "steps": ["Timing", "Herd Details", "Assignment", "Review"]
+    },
+    "/sessions/[sessionId]": {
+      "name": "Session Detail",
+      "description": "Full task checklist + cow process status + clinical guidance panel (former /recommendations content) + employee reassignment + audit trail",
+      "components": ["TaskChecklist", "ClinicalGuidancePanel", "SessionActions", "AuditTrailList"]
+    },
+    "/settings": {
+      "name": "Settings",
+      "description": "Supervisor profile (matches sidebar footer avatar pattern from Images 2-4), clinical threshold slider (20-60), notification toggle with live status dot",
+      "components": ["ThresholdSlider", "NotificationToggle"]
+    },
+    "/settings/patient": {
+      "name": "Patient/Herd Settings",
+      "description": "Per-cow/herd metadata configuration, no longer a bare placeholder — table of registered cow IDs with tag/RFID, position assignment"
+    }
+  },
+  "components": {
+    "layout": {
+      "Sidebar": "Fixed dark navy (sidebarBg), wordmark + unit subtitle top, nav items with icon+label, active item = mint pill background with dark text, 'New Session' dark button pinned above footer, user profile card (avatar, name, role) pinned to bottom — matches Images 2-4 exactly",
+      "TopBar": "White, 1px bottom border, page/section title left, tab-style secondary nav if applicable, global search input (icon-left, gray-50 bg, 8px radius), notification bell, alert icon, help icon, optional red 'Emergency Stop' pill button on Analytics/Live pages"
+    },
+    "shared": {
+      "Button": "Primary = dark navy bg, white text, 10px radius. Secondary = white bg, 1px border, dark text. Danger = filled danger red, used only for override/flag/emergency actions.",
+      "Input": "1px border, 8px radius, 14px text, focus ring in accentBright at 30% opacity",
+      "Card": "White surface, 1px border, 16px radius, shadow.card",
+      "Label": "Uppercase 11px 600-weight textMuted, letter-spacing 0.06em",
+      "Metric": "Manrope 40px 800-weight",
+      "StatusPill": "Pill radius, semantic soft bg + solid text color: success/warning/danger/neutral variants",
+      "ProgressRing": "SVG donut, mint stroke on gray-200 track, center % + status pill, used for compliance score",
+      "StackedBarChart": "Two-tone bars (accent + warning) per category, used for missed-task frequency",
+      "DataTable": "Left-aligned uppercase-label header row, zebra-free, row hover = canvas tint, status column uses StatusPill"
+    },
+    "dashboard": {
+      "LiveSessionBanner": "Live indicator = small mint dot with livePulse animation + 'Active' label, session elapsed timer (large Manrope numerals, '/' total), assigned operator + throughput stat",
+      "PositionMonitorCard": "Dark video-frame header bar with position label + status pill (MILKING mint / VIOLATION danger), thumbnail feed with ROI overlay box, PROCESS COMPLIANCE checklist below (check icon mint / skip icon danger / spinner in-progress / empty circle pending), OVERRIDE & FLAG INCIDENT full-width danger button appears only when a violation state is present",
+      "TaskChecklist": "6 milking tasks (Pre-cleaning, Stripping, Machine attachment, Milking, Detachment, Post-dip), status badge + inline duration, override affordance per row",
+      "OverrideModal": "Centered modal, task status select (completed/missed/anomaly_flagged/unverifiable), reason textarea, posts to /api/task-events/[id]/override",
+      "RecentAlertsLog": "Right rail card, timestamped entries with colored left border by severity, VIEW CLIP / DISMISS inline actions, compliance score progress bar pinned at bottom of the card"
+    },
+    "scheduler": {
+      "StepIndicator": "4-step numbered pill row with connecting line, matches Image 3 styling precisely",
+      "MultiStepSessionForm": "Step 1 Timing (start/end datetime pickers + buffer info callout), Step 2 Herd Details (cow count, position assignment), Step 3 Assignment (operator picker), Step 4 Review (summary card + confirm)"
+    },
+    "analytics": {
+      "ComplianceScoreDonut": "Mint ring donut, center %, status pill (OPTIMAL/AT RISK/CRITICAL), completed/missed totals below",
+      "MissedTaskBarChart": "6 categories (Pre-Dip, Stripping, Dry Wipe, Attachment, Alignment, Post-Dip), stacked completed(mint)/missed(amber), legend top-right",
+      "EfficiencyBarList": "Horizontal progress bars per task phase with benchmark tick + current value label",
+      "StaffComplianceTable": "Employee avatar, name, compliance %, avg speed per cycle, status pill",
+      "PredictiveInsightBanner": "Full-width dark navy card, insight copy, secondary 'Review Protocol Changes' button, small stat tiles (Sensor Health, Network Sync) right-aligned"
+    },
+    "reports": {
+      "ReportGenerator": "Client component calling POST /api/reports/generate, styled as the 'Download Full Report (.docx)' dark button pattern from Image 4, shows recent report list below"
+    }
+  },
+  "apiRoutes": {
+    "/api/sessions": {
+      "GET": "List sessions, rate limited 120/min",
+      "POST": "Create session, rate limited 20/min"
+    },
+    "/api/sessions/[sessionId]/employee": { "PATCH": "Reassign employee, creates audit log" },
+    "/api/events/ingest": { "POST": "Ingest events from inference service, Bearer token auth, rate limited 120/min, publishes to broadcast" },
+    "/api/task-events/[taskEventId]/override": { "PATCH": "Manual override with reason, creates audit log" },
+    "/api/reports/generate": { "POST": "Generate DOCX report, returns file URL" },
+    "/api/ws": { "GET": "SSE endpoint filtered by session_id" }
+  },
+  "dataLayer": {
+    "store": "Replace lib/data/store.ts JSON file I/O with Drizzle ORM queries against the existing 7-table Postgres schema — the schema already exists and should become the single source of truth",
+    "types": ["SessionRecord", "CowProcessRecord", "TaskEventRecord (TASK-01..06)", "AuditLogEntry", "ReportRecord"],
+    "functions": ["listSessions", "getSession", "getSessionDetails", "createSession", "updateSessionEmployee", "ingestTaskEvent", "overrideTaskEvent", "createReport", "getStatistics", "getMonitoringOverview", "getTaskEvent"]
+  },
+  "realTimeArchitecture": {
+    "protocol": "Server-Sent Events (EventSource)",
+    "endpoint": "/api/ws?session_id=",
+    "client": "LiveSessionStream component feeding PositionMonitorCard + RecentAlertsLog",
+    "server": "lib/realtime/broadcast.ts",
+    "ingest": "POST /api/events/ingest",
+    "eventTypes": ["task_event", "cow_process", "session_status", "alert"]
+  },
+  "authentication": {
+    "provider": "Clerk",
+    "theming": "Use Clerk appearance API to fully restyle SignIn/SignUp components with project tokens — never ship default Clerk theme",
+    "protection": "Middleware protects all routes except /sign-in* and /sign-up*",
+    "fix": "Delete app/(auth)/sign-in/page.tsx and app/(auth)/sign-up/page.tsx; keep only app/sign-in/[[...sign-in]]/page.tsx and app/sign-up/[[...sign-up]]/page.tsx to remove the routing conflict"
+  },
+  "inferenceIntegration": {
+    "service": "Python FastAPI on port 8001",
+    "endpoints": [
+      "POST /session-window - Start processing session (RTSP stream, YOLOv8, task state machine)",
+      "POST /session-window/{id}/stop - Stop session processing"
+    ],
+    "webhook": "POST /api/events/ingest (WEB_APP_INGEST_URL + WEB_APP_INGEST_TOKEN)",
+    "model": "YOLOv8, surfaced in /equipment as model version + accuracy badge (mirrors 'YOLO Model v4.2.1 online, Accuracy 98.4%' log entry style)"
+  },
+  "fixesFromAudit": [
+    "Remove all French/English mixed copy — all UI copy in English",
+    "Remove dead /pressure route from nav; live monitoring lives at /live",
+    "Remove unused clerkMiddleware import / empty middleware() export — implement real route matching",
+    "Design proper empty states for zero-session, zero-alert, zero-report scenarios instead of leaving panels blank",
+    "Add dark mode is explicitly OUT of scope for this pass — ship light app canvas + dark sidebar only, do not build a toggle"
+  ]
+}

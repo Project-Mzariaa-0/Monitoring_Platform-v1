@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SessionWindow",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "session_id": { "type": "string" },
+    "start_time": { "type": "string", "format": "date-time" },
+    "end_time": { "type": "string", "format": "date-time" },
+    "cow_positions": {
+      "type": "array",
+      "items": { "type": "integer", "enum": [1, 2] },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "required": ["session_id", "start_time", "end_time", "cow_positions"]
+}

@@ -1,0 +1,266 @@
+
+{
+  "project": "Milking Monitor Platform",
+  "frontend": {
+    "framework": "Next.js 15.5.20 (App Router)",
+    "language": "TypeScript",
+    "packageManager": "npm",
+    "styling": "Vanilla CSS with CSS Custom Properties (design tokens)",
+    "authentication": "Clerk (Next.js integration)",
+    "database": "PostgreSQL via Drizzle ORM (7 tables)",
+    "realTime": "Server-Sent Events (EventSource) via /api/ws",
+    "stateManagement": "Server-side JSON file store (lib/data/store.ts) with server actions",
+    "fonts": "Inter (system-ui fallback), Manrope (headings/brand)"
+  },
+  "designSystem": {
+    "colorPalette": {
+      "background": "#f9fafb",
+      "card": "#ffffff",
+      "foreground": "#1f2937",
+      "muted": "#6b7280",
+      "border": "#e5e7eb",
+      "primary": "#003f7b",
+      "primaryHover": "#1a5c9e",
+      "success": "#006e11",
+      "warning": "#f59e0b",
+      "danger": "#ba1a1a"
+    },
+    "borderRadius": {
+      "card": "16px",
+      "button": "12px",
+      "input": "8px"
+    },
+    "shadows": {
+      "card": "0 1px 3px rgba(0, 0, 0, 0.06)"
+    },
+    "spacing": "8px base unit",
+    "typography": {
+      "body": "Inter, system-ui, sans-serif",
+      "heading": "Manrope, Inter, sans-serif",
+      "scale": {
+        "hero": "32px",
+        "section": "18-22px",
+        "metric": "40px",
+        "label": "12px",
+        "body": "14-16px",
+        "small": "12px"
+      }
+    },
+    "animations": {
+      "pulse": "derma-pulse 2s ease-in-out infinite",
+      "transition": "300ms ease"
+    }
+  },
+  "routing": {
+    "middleware": "Clerk middleware protecting all routes except /sign-in* and /sign-up*",
+    "groups": {
+      "(auth)": {
+        "paths": ["/sign-in", "/sign-up"],
+        "description": "Public auth pages using Clerk components"
+      },
+      "(dashboard)": {
+        "paths": [
+          "/",
+          "/monitoring",
+          "/pressure",
+          "/alerts",
+          "/settings",
+          "/settings/patient",
+          "/reports",
+          "/recommendations",
+          "/sessions/new",
+          "/sessions/[sessionId]",
+          "/sessions/[sessionId]/live"
+        ],
+        "layout": "App shell with top bar, main container, and bottom navigation"
+      }
+    }
+  },
+  "pages": {
+    "/": {
+      "name": "Home / Supervisor Overview",
+      "description": "Dashboard landing page with hero card, 3 metric cards (Sessions today, Active alerts, Missed tasks), and current session panel with live link",
+      "components": ["HeroCard", "MetricCards", "CurrentSessionCard"],
+      "dataSource": "getMonitoringOverview() from store"
+    },
+    "/monitoring": {
+      "name": "Monitoring",
+      "description": "Two-cow-position visual grid (40 cells each, 5x8) with color-coded pressure status indicators (success/warning/danger), system status panel showing inference service connection state",
+      "components": ["PressureGrid", "SystemStatusCard"],
+      "dataSource": "getMonitoringOverview()"
+    },
+    "/pressure": {
+      "name": "Pressure (placeholder)",
+      "description": "Linked in bottom nav but no dedicated page file exists - likely future implementation"
+    },
+    "/alerts": {
+      "name": "Alerts",
+      "description": "List of compliance alerts with severity levels (critical/warning/info) indicated by left border color, static mock data",
+      "components": ["AlertCard"]
+    },
+    "/recommendations": {
+      "name": "Recommandations (French)",
+      "description": "Clinical guidance panel showing risk level (Critique) and repositioning/care instructions, gradient background card",
+      "components": ["RiskLevelCard", "GuidanceCard"]
+    },
+    "/reports": {
+      "name": "Reports",
+      "description": "ReportGenerator component for creating DOCX reports via /api/reports/generate, list of recent reports with download links",
+      "components": ["ReportGenerator", "ReportList"],
+      "dataSource": "getStatistics()"
+    },
+    "/settings": {
+      "name": "Paramètres (Settings)",
+      "description": "Supervisor profile, clinical threshold slider (20-60), notification toggle with status indicator",
+      "components": ["ThresholdSlider", "NotificationToggle"]
+    },
+    "/settings/patient": {
+      "name": "Patient Settings",
+      "description": "Placeholder page for patient-specific settings"
+    },
+    "/sessions/new": {
+      "name": "New Session",
+      "description": "Multi-step session creation form (MultiStepSessionForm component) - stepper wizard for session configuration",
+      "components": ["MultiStepSessionForm"]
+    },
+    "/sessions/[sessionId]": {
+      "name": "Session Detail",
+      "description": "Detailed session view with task checklist, cow process status, and override capabilities",
+      "components": ["TaskChecklist", "SessionActions", "LiveSessionStream"],
+      "dataSource": "getSessionDetails()"
+    },
+    "/sessions/[sessionId]/live": {
+      "name": "Live Session View",
+      "description": "Real-time monitoring with EventSource connection to /api/ws, live event feed, task checklist with override modal",
+      "components": ["LiveSessionBanner", "TaskChecklist", "OverrideModal", "LiveSessionStream"],
+      "realTime": true
+    }
+  },
+  "components": {
+    "shared": {
+      "Button": "Primary (blue) / Secondary (white with border) variants, rounded-12px",
+      "Input": "Text, textarea, select with 8px radius, border-gray",
+      "Card": "White background, 1px border, 16px radius, subtle shadow",
+      "Label": "Uppercase, 12px, 600 weight, muted color, letter-spacing",
+      "Metric": "Manrope 40px, 800 weight, tight letter-spacing",
+      "SectionTitle": "Manrope 18px, 700 weight",
+      "NavCard": "Flex justify-between, padded card for list items",
+      "PageGrid": "CSS Grid gap-16px responsive layout"
+    },
+    "dashboard": {
+      "LiveSessionBanner": "Live indicator with pulsing green dot, 'Active' metric, gradient left border",
+      "TaskChecklist": "6 milking tasks (TASK-01 to TASK-06: Pre-cleaning, Stripping, Machine attachment, Milking, Detachment, Post-dip), status badges, override button per task",
+      "OverrideModal": "Modal for manual task status correction (completed/missed/anomaly_flagged/unverifiable) with reason textarea, posts to /api/task-events/[id]/override",
+      "SessionActions": "Employee reassignment form with PATCH to /api/sessions/[id]/employee",
+      "LiveSessionStream": "EventSource client connecting to /api/ws?session_id=, displays last 8 events in real-time"
+    },
+    "forms": {
+      "MultiStepSessionForm": "Stepper wizard for session creation (exported from ui/index.ts)"
+    },
+    "reports": {
+      "ReportGenerator": "Client component calling POST /api/reports/generate with session_id, shows download link on success"
+    }
+  },
+  "apiRoutes": {
+    "/api/sessions": {
+      "GET": "List all sessions (rate limited 120/min)",
+      "POST": "Create new session (rate limited 20/min)"
+    },
+    "/api/sessions/[sessionId]/employee": {
+      "PATCH": "Reassign employee to session, creates audit log"
+    },
+    "/api/events/ingest": {
+      "POST": "Ingest events from inference service (Bearer token auth, rate limited 120/min), publishes to real-time broadcast"
+    },
+    "/api/task-events/[taskEventId]/override": {
+      "PATCH": "Manual task status override with reason, creates audit log"
+    },
+    "/api/reports/generate": {
+      "POST": "Generate DOCX report for session (docx-generator.ts), returns file URL"
+    },
+    "/api/ws": {
+      "GET": "Server-Sent Events endpoint for real-time session events, filters by session_id query param"
+    }
+  },
+  "dataLayer": {
+    "store": "lib/data/store.ts - JSON file-based persistence (data/runtime-store.json)",
+    "types": [
+      "SessionRecord",
+      "CowProcessRecord",
+      "TaskEventRecord (TASK-01 through TASK-06)",
+      "AuditLogEntry",
+      "ReportRecord"
+    ],
+    "seedData": "Pre-populated with session-1042, 2 cow processes, 2 task events, 1 report",
+    "functions": [
+      "listSessions",
+      "getSession",
+      "getSessionDetails",
+      "createSession",
+      "updateSessionEmployee",
+      "ingestTaskEvent",
+      "overrideTaskEvent",
+      "createReport",
+      "getStatistics",
+      "getMonitoringOverview",
+      "getTaskEvent"
+    ]
+  },
+  "realTimeArchitecture": {
+    "protocol": "Server-Sent Events (EventSource)",
+    "endpoint": "/api/ws?session_id=",
+    "client": "LiveSessionStream component",
+    "server": "lib/realtime/broadcast.ts - broadcasts to session subscribers",
+    "ingest": "POST /api/events/ingest publishes to broadcast channel",
+    "eventTypes": ["task_event", "cow_process", "session_status", "alert"]
+  },
+  "authentication": {
+    "provider": "Clerk",
+    "components": [
+      "SignIn (app/sign-in/[[...sign-in]]/page.tsx)",
+      "SignUp (app/sign-up/[[...sign-up]]/page.tsx)",
+      "Dashboard auth pages (app/(auth)/sign-in/page.tsx, app/(auth)/sign-up/page.tsx)"
+    ],
+    "protection": "Middleware protects all routes except /sign-in* and /sign-up*",
+    "issue": "Route conflict: /sign-in page exists in both (auth) group and [[...sign-in]] catch-all causing Next.js error"
+  },
+  "inferenceIntegration": {
+    "service": "Python FastAPI on port 8001",
+    "endpoints": [
+      "POST /session-window - Start processing session (RTSP stream, YOLOv8, task state machine)",
+      "POST /session-window/{id}/stop - Stop session processing"
+    ],
+    "webhook": "POST /api/events/ingest on web app (WEB_APP_INGEST_URL + WEB_APP_INGEST_TOKEN)",
+    "model": "YOLOv8 (MODEL_WEIGHTS_PATH)",
+    "config": "ROIs (config/rois.json), thresholds (config/thresholds.json)"
+  },
+  "stylingFiles": {
+    "globals.css": "Complete design token system, layout utilities, component classes, animations",
+    "approach": "CSS-first with custom properties, no Tailwind/Styled Components"
+  },
+  "knownIssues": [
+    "Clerk route conflict: /sign-in defined in both app/(auth)/sign-in/page.tsx and app/sign-in/[[...sign-in]]/page.tsx",
+    "Bottom nav includes '/pressure' route but no page exists",
+    "Middleware has unused clerkMiddleware import and empty middleware() export",
+    "Store is JSON file (not production DB) - Drizzle schema exists but store.ts uses file I/O",
+    "No dark mode support",
+    "French/English mixed content (Recommandations, Paramètres, Alertes vs English elsewhere)"
+  ],
+  "projectStructure": {
+    "apps/web": {
+      "app": "Next.js App Router pages and API routes",
+      "components": "React components (dashboard, forms, reports, ui exports)",
+      "lib": {
+        "db": "Drizzle ORM schema (7 tables) and client",
+        "data": "JSON file store with TypeScript types",
+        "inference-client": "Session window notification to inference service",
+        "realtime": "SSE broadcast channel",
+        "reporting": "DOCX generation",
+        "security": "Rate limiting, input sanitization",
+        "validation": "Zod schemas"
+      },
+      "middleware.ts": "Clerk auth protection"
+    },
+    "apps/inference-service": "Python FastAPI + YOLOv8 + state machine"
+  }
+}

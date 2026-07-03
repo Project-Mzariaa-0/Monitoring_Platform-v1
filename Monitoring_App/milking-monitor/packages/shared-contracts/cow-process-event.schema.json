@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CowProcessEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "session_id": { "type": "string" },
+    "cow_position": { "type": "integer", "enum": [1, 2] },
+    "event_type": { "type": "string", "enum": ["started", "completed"] },
+    "detected_time": { "type": "string", "format": "date-time" }
+  },
+  "required": ["session_id", "cow_position", "event_type", "detected_time"]
+}

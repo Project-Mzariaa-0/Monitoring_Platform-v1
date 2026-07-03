@@ -1,0 +1,14 @@
+{
+  "cow_position_1": {
+    "x": 0,
+    "y": 0,
+    "width": 640,
+    "height": 720
+  },
+  "cow_position_2": {
+    "x": 640,
+    "y": 0,
+    "width": 640,
+    "height": 720
+  }
+}
