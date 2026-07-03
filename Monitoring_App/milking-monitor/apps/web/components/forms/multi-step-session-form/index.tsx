@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 
 const steps = ["Timing", "Herd Details", "Assignment", "Review"];
@@ -13,16 +13,9 @@ export default function MultiStepSessionForm() {
   const [row1Count, setRow1Count] = useState(12);
   const [row2Count, setRow2Count] = useState(12);
   const [employeeName, setEmployeeName] = useState("");
-  const [supervisorName, setSupervisorName] = useState("");
-  const [supervisorEmail, setSupervisorEmail] = useState("");
+  const [supervisorName, setSupervisorName] = useState(session?.user?.name || "");
+  const [supervisorEmail, setSupervisorEmail] = useState(session?.user?.email || "");
   const [result, setResult] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (session?.user) {
-      setSupervisorName(session.user.name || "");
-      setSupervisorEmail(session.user.email || "");
-    }
-  }, [session]);
 
   const summary = useMemo(
     () => [

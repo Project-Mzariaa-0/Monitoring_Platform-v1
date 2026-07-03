@@ -14,29 +14,28 @@ type ServiceStatus = {
 };
 
 export default function EquipmentStatus({ services }: { services: Service[] }) {
-  const [statuses, setStatuses] = useState<Map<string, ServiceStatus>>(new Map());
+  const [statuses, setStatuses] = useState<Map<string, ServiceStatus>>(() => {
+    const initial = new Map<string, ServiceStatus>();
+    for (const service of services) {
+      if (service.type === "stream" || service.type === "model") {
+        initial.set(service.name, {
+          status: service.url === "Not configured" ? "offline" : "unknown",
+          detail: service.url === "Not configured" ? "Not configured" : "Manual check required",
+        });
+      } else {
+        initial.set(service.name, { status: "checking", detail: "Checking..." });
+      }
+    }
+    return initial;
+  });
 
   useEffect(() => {
     const controllers: AbortController[] = [];
 
     for (const service of services) {
       if (service.type === "stream" || service.type === "model") {
-        setStatuses((prev) => {
-          const next = new Map(prev);
-          next.set(service.name, {
-            status: service.url === "Not configured" ? "offline" : "unknown",
-            detail: service.url === "Not configured" ? "Not configured" : "Manual check required",
-          });
-          return next;
-        });
         continue;
       }
-
-      setStatuses((prev) => {
-        const next = new Map(prev);
-        next.set(service.name, { status: "checking", detail: "Checking..." });
-        return next;
-      });
 
       const controller = new AbortController();
       controllers.push(controller);

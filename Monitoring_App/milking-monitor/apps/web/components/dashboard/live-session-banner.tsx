@@ -25,7 +25,7 @@ export default function LiveSessionBanner({
   estimatedEnd?: string;
   cowCount?: number;
 }) {
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!active) return;
