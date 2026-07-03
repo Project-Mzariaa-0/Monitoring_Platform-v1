@@ -1,0 +1,446 @@
+{
+  "project": "Milking Monitor Platform — 'Cooperative' Redesign",
+  "purpose": "Complete frontend rebuild reference for LLM coding agents. Keeps every real route, component, API contract, DB column, and data-flow from the current app intact, and replaces the visual/interaction layer with a calm, minimal, premium-cooperative aesthetic — no gauges, no glow, no scanlines. Clean over clever.",
+  "designThesis": "This is the platform a well-run dairy cooperative would actually put its name on: quiet, confident, legible from across a room, and built to be trusted by an inspector as much as an operator. One accent color, one typeface family, generous whitespace, and a single recurring motif (the seal ring) instead of a cabinet of instrument metaphors.",
+  "signatureElement": "The Seal Ring — a flat, thin-stroke circular progress ring (no needle, no tick marks, no gradient) used for compliance score, sensor health, and per-employee compliance. It reads like the quality stamp on a dairy product, not a dashboard widget.",
+  "techStack": {
+    "framework": "Next.js 15 (App Router)",
+    "language": "TypeScript (strict)",
+    "styling": "Vanilla CSS with CSS Custom Properties (globals.css design tokens). NO Tailwind.",
+    "auth": "NextAuth v4 with CredentialsProvider (email+password) + EmailProvider (magic link via Resend) — unchanged, only re-themed",
+    "database": "PostgreSQL via Drizzle ORM (node-postgres driver) — unchanged schema",
+    "realtime": "Server-Sent Events (EventSource) via /api/ws — unchanged",
+    "validation": "Zod schemas (lib/validation/) — unchanged",
+    "reporting": "DOCX generation via docx library — unchanged, re-themed trigger button only",
+    "fonts": {
+      "family": "Schibsted Grotesk — the ONLY typeface in the system. A humanist Scandinavian grotesk (literally designed for a Norwegian media house), used at multiple weights instead of pairing a display face with a body face.",
+      "usage": "700/600 weight for headings and metrics, 500 for labels and section titles, 400 for body copy. Tabular figures (font-variant-numeric: tabular-nums) used for all numeric data instead of switching to a monospace family."
+    }
+  },
+  "designSystem": {
+    "colorPalette": {
+      "canvas": "#F7F5EF",
+      "surface": "#FFFFFF",
+      "sidebarBg": "#1F4D3A",
+      "sidebarText": "#D8E6DC",
+      "sidebarActiveBg": "#2C5941",
+      "sidebarActiveIndicator": "#F7F5EF",
+      "textPrimary": "#20261F",
+      "textSecondary": "#5C6B5D",
+      "textMuted": "#8B968B",
+      "border": "#E4E0D2",
+      "accent": "#1F4D3A",
+      "accentSoft": "#E3ECE5",
+      "warning": "#C98A2B",
+      "warningSoft": "#F6ECD9",
+      "danger": "#B4432E",
+      "dangerSoft": "#F5E4DF",
+      "success": "#1F4D3A",
+      "successSoft": "#E3ECE5"
+    },
+    "paletteRules": [
+      "Deep forest green (#1F4D3A) is the ONLY accent — used for the sidebar, primary buttons, seal rings in a good state, and active nav. It carries the whole brand.",
+      "Ochre/mustard (#C98A2B) is used exclusively for warning states — never decoratively.",
+      "Terracotta (#B4432E) is used exclusively for danger/violation states — an earthy red, not a screen-red, so it reads serious without looking alarmist.",
+      "No gradients, no glow, no drop-shadow-as-decoration. The only shadow in the system is a very faint elevation shadow reserved for modals and dropdowns."
+    ],
+    "borderRadius": {
+      "card": "12px",
+      "button": "8px",
+      "input": "8px",
+      "pill": "999px",
+      "sealRing": "999px"
+    },
+    "shadows": {
+      "card": "none — cards are defined by a 1px solid border (#E4E0D2), not a shadow",
+      "elevated": "0 8px 24px rgba(31, 77, 58, 0.08) — reserved for modals, dropdowns, and the profile menu only"
+    },
+    "spacing": "8px base unit, 32px page gutter (up from the current app's 24px, to reinforce the calmer, less-dense feel), 20px card padding, 16px section gap",
+    "typography": {
+      "pageTitle": "Schibsted Grotesk 700, 26px, normal case (not uppercase — this direction avoids shouting)",
+      "sectionTitle": "Schibsted Grotesk 600, 15px, normal case, textSecondary",
+      "metric": "Schibsted Grotesk 700, 38px, tabular-nums, tight letter-spacing -0.01em",
+      "label": "Schibsted Grotesk 600, 11px, uppercase, letter-spacing 0.08em, textMuted — the one place uppercase is used, sparingly, for structural labels only",
+      "body": "Schibsted Grotesk 400, 15px, line-height 1.55",
+      "small": "Schibsted Grotesk 400, 13px",
+      "brandName": "Schibsted Grotesk 700, 19px, sidebarText",
+      "authHeadline": "Schibsted Grotesk 700, clamp(32px, 4vw, 48px), line-height 1.08 — restrained size compared to the earlier console direction, no text-shadow"
+    },
+    "iconography": "Single-weight (1.5px stroke) rounded-line icons, geometric and simple — a leaf, a drop, a checkmark, a clock. No filled icons, no gradients on icons.",
+    "backgroundAtmosphere": "None. Flat canvas color, no scanlines, no vignette, no ambient glow. Depth comes entirely from the border + generous whitespace + the one accent color, not from surface texture.",
+    "motion": {
+      "pageLoad": "A single, quiet staggered fade-up: each top-level panel animates opacity 0→1 and translateY(8px→0) over 320ms, 40ms stagger between panels, ease-out. No flicker, no scanline sweep, no boot sequence.",
+      "sealRingFill": "The ring's arc animates from 0 to its value over 700ms ease-out on mount/update — a calm fill, not a needle sweep.",
+      "liveIndicator": "A slow 'breathing' opacity animation (1 → 0.6 → 1 over 2.4s, ease-in-out) instead of a hard pulse or blink — reads as alive, not alarming.",
+      "hover": "Buttons and nav items shift background 1-2% and content translateY(-1px) over 150ms — no glow, no scale.",
+      "reducedMotion": "All animation collapses to a simple opacity fade or is skipped entirely."
+    },
+    "antiPatterns": [
+      "No dark-console/CRT motifs, no gauges-with-needles, no glow/scanlines — this direction is the deliberate correction away from that",
+      "No purple gradients, no generic SaaS mint/navy combo",
+      "No uppercase headlines — uppercase is reserved for the small structural label style only",
+      "No second typeface introduced for data — tabular figures within Schibsted Grotesk do that job",
+      "No mixed French/English copy — English throughout",
+      "No mock/placeholder data left visible in production — every empty state is authored and calm, not a blank div"
+    ]
+  },
+  "layoutStructure": {
+    "rootLayout": "app/layout.tsx wraps everything in <html><body><AuthProvider>{children}</AuthProvider></body></html> — unchanged",
+    "authLayout": "app/(auth)/layout.tsx renders the split-screen Access layout described below, not a reused DashboardShell",
+    "dashboardLayout": "app/(dashboard)/layout.tsx wraps all dashboard pages in <DashboardShell>{children}</DashboardShell> — unchanged wiring, re-themed component",
+    "middleware": "middleware.ts uses withAuth() from next-auth/middleware — unchanged logic and exclusions"
+  },
+  "appLayout": {
+    "description": "Two-column grid: fixed 260px sidebar + flexible main content area. Below 980px, collapses to single column with static sidebar — unchanged from current app.",
+    "css": ".app-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; background: var(--canvas); }"
+  },
+  "sidebar": {
+    "description": "Fixed 260px deep forest green sidebar — the one confident dark surface in an otherwise light system. No border-radius, no bezel treatment, just a flat fill and a soft 1px border between it and the canvas.",
+    "sections": [
+      {
+        "name": "Brand",
+        "content": "Simple leaf/drop mark (single-color, cream) + 'Milking Monitor' in Schibsted Grotesk 700 + 'Compliance Unit' subtitle in a muted sidebar text tone",
+        "styles": {
+          "brandMark": "32x32px, radius 8px, background rgba(255,255,255,0.12), cream glyph, no heavy border",
+          "brandName": "19px, 700 weight, color #F7F5EF",
+          "brandSubtitle": "12px, color #9CB3A4"
+        }
+      },
+      {
+        "name": "Navigation",
+        "items": [
+          { "href": "/", "label": "Overview" },
+          { "href": "/live", "label": "Live" },
+          { "href": "/logs", "label": "Unit Logs" },
+          { "href": "/equipment", "label": "Equipment" },
+          { "href": "/analytics", "label": "Analytics" },
+          { "href": "/scheduler", "label": "Scheduler" },
+          { "href": "/settings", "label": "Settings" }
+        ],
+        "iconsNote": "Each item pairs with a single simple line icon (see iconography) instead of a decorative letter glyph",
+        "consolidationNote": "Canonical routes only — see routeConsolidation below for how /monitoring, /alerts, /recommendations, /reports, /statistics, and /sessions/new fold in",
+        "styles": {
+          "navItem": "min-height 42px, flex row, gap 10px, padding 10px 14px, radius 8px, color #D8E6DC, font 500 14px",
+          "navItemHover": "background rgba(255,255,255,0.06)",
+          "navItemActive": "background rgba(255,255,255,0.14), color #FFFFFF, font-weight 600 — a soft filled rounded rect, not a bright pill or an edge indicator"
+        }
+      },
+      {
+        "name": "New Session Button",
+        "content": "href /scheduler/new (canonical route)",
+        "styles": "Cream-outlined button on the green sidebar, radius 999px, background transparent, border 1px solid rgba(255,255,255,0.35), fills solid cream with green text on hover — calm, not urgent-red; this app treats scheduling as routine, not an alarm action"
+      },
+      {
+        "name": "Profile Card",
+        "content": "Avatar (initials) + name + 'Supervisor' label + 'Sign out' link",
+        "styles": {
+          "profileCard": "flex row, gap 10px, padding 12px, radius 12px, background rgba(255,255,255,0.06), no border",
+          "avatar": "34x34px, radius 999px, background #F7F5EF, color #1F4D3A, font-weight 700",
+          "name": "color #FFFFFF, font-weight 600",
+          "signOut": "color #D8E6DC, 12px, no underline, opacity 0.75, full opacity on hover"
+        }
+      }
+    ]
+  },
+  "topbar": {
+    "description": "Sticky white top strip, quieter than the current app's — no backdrop blur needed since there's nothing busy behind it to blur.",
+    "css": ".topbar { position: sticky; top: 0; z-index: 20; min-height: 76px; display:flex; align-items:center; justify-content:space-between; gap:20px; padding:18px 32px; background: #FFFFFF; border-bottom: 1px solid #E4E0D2; }",
+    "elements": {
+      "pageTitle": "26px Schibsted Grotesk 700, normal case, dynamic per route",
+      "subtitle": "13px, textSecondary — kept as plain descriptive text (e.g. 'Industrial milking compliance monitoring'), no live clock gimmick",
+      "search": "min(30vw,320px), padding 10px 14px, radius 999px (pill, not a boxy input, to feel softer), background canvas, border 1px solid border color",
+      "iconButtons": "40x40px, radius 999px, border 1px solid border color, background #FFFFFF, textSecondary icon — Notifications / Alerts / Help, same 3 as current app",
+      "emergencyStop": "Kept only on /live and /analytics, but restyled as a plain outlined terracotta button with the word 'Stop' — no flashing, no glow; seriousness comes from restraint, not decoration"
+    }
+  },
+  "mainContent": {
+    "css": ".main-shell { min-width:0; flex:1; display:flex; flex-direction:column; background: var(--canvas); }",
+    "pageContainer": ".page { width:100%; max-width:1440px; padding:32px; }"
+  },
+  "reusableComponents": {
+    "Card": {
+      "css": ".card { background:#FFFFFF; border:1px solid #E4E0D2; border-radius:12px; }",
+      "padding": ".card-pad { padding: 20px; }",
+      "accentPanel": ".accent-panel { background:#1F4D3A; color:#F7F5EF; border-color:#1F4D3A; } — used sparingly, e.g. the dashboard hero and the analytics insight panel, as the one deliberate dark moment per page"
+    },
+    "Grids": {
+      "pageGrid": ".page-grid { display:grid; gap:16px; }",
+      "grid2": ".grid-2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }",
+      "grid3": ".grid-3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }",
+      "dashboardGrid": ".dashboard-grid { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:16px; }"
+    },
+    "StatusTag": {
+      "css": ".status-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; font:600 11px Schibsted Grotesk; letter-spacing:0.02em; }",
+      "variants": {
+        "success": "background #E3ECE5, color #1F4D3A",
+        "warning": "background #F6ECD9, color #8A5D1B",
+        "danger": "background #F5E4DF, color #8A2E1C",
+        "neutral": "background #EFEDE4, color #5C6B5D"
+      }
+    },
+    "Buttons": {
+      "base": ".button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:42px; padding:10px 16px; border-radius:8px; font:600 14px Schibsted Grotesk; transition:150ms ease; }",
+      "primary": ".button-primary { background:#1F4D3A; color:#FFFFFF; border:1px solid #1F4D3A; } hover: background #234F3C, translateY(-1px)",
+      "secondary": ".button-secondary { background:#FFFFFF; border:1px solid #E4E0D2; color:#20261F; } hover: border-color #C9C4B2",
+      "danger": ".button-danger { background:#FFFFFF; border:1px solid #B4432E; color:#B4432E; } hover: background #F5E4DF"
+    },
+    "Inputs": {
+      "css": ".input, .select, textarea.input { width:100%; min-height:44px; padding:11px 14px; border:1px solid #E4E0D2; border-radius:8px; background:#FFFFFF; color:#20261F; font:15px 'Schibsted Grotesk'; }",
+      "focus": "border-color #1F4D3A, box-shadow 0 0 0 3px rgba(31,77,58,0.12) — a soft focus ring, not a hard glow"
+    },
+    "Labels": {
+      "css": ".label { display:block; margin-bottom:8px; color:#8B968B; font:600 11px Schibsted Grotesk; letter-spacing:0.08em; text-transform:uppercase; }"
+    },
+    "DataRows": {
+      "css": ".check-row, .data-row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 0; border-top:1px solid #E4E0D2; }"
+    },
+    "SectionTitle": { "css": ".section-title { margin:0 0 14px; font:600 15px 'Schibsted Grotesk'; color:#5C6B5D; }" },
+    "Metric": { "css": ".metric { font:700 38px 'Schibsted Grotesk'; font-variant-numeric: tabular-nums; letter-spacing:-0.01em; color:#20261F; }" },
+    "Muted": { "css": ".muted { color:#5C6B5D; }" },
+    "VideoFrame": {
+      "css": ".video-frame { position:relative; min-height:180px; overflow:hidden; border-radius:10px; background:#EFEDE4; border:1px solid #E4E0D2; }",
+      "note": "A calm flat neutral placeholder instead of the current app's striped mint-tinted pattern — texture is not needed to communicate 'this is a camera feed'"
+    },
+    "RoiBox": { "css": ".roi-box { position:absolute; inset:34px 48px; border:2px solid #1F4D3A; border-radius:10px; }" },
+    "SealRing": {
+      "new": true,
+      "description": "Signature component. Flat SVG ring, single stroke color per state (accent for good, warning ochre for at-risk, danger terracotta for critical), no needle, no tick marks, no gradient — a clean stroke-dasharray arc that fills calmly on mount. Metric value centered inside in tabular-nums Schibsted Grotesk, small status label beneath.",
+      "usage": "Compliance score (dashboard hero, analytics), sensor/service health (equipment), missed-task rate summary (analytics), per-employee compliance (analytics table)",
+      "replaces": "The current app's conic-gradient .donut and .progress-track/.progress-fill everywhere"
+    },
+    "Table": {
+      "css": ".table { width:100%; border-collapse:collapse; font-family:'Schibsted Grotesk'; }",
+      "header": ".table th { color:#8B968B; font-size:11px; letter-spacing:0.06em; text-align:left; text-transform:uppercase; font-weight:600; }",
+      "cellPadding": ".table th,.table td { padding:14px; border-bottom:1px solid #E4E0D2; font-variant-numeric: tabular-nums; }",
+      "rowHover": ".table tr:hover td { background:#FBFAF6; }"
+    },
+    "AlertItem": { "css": ".alert-item { padding:14px; border-radius:10px; background:#FBFAF6; border:1px solid #E4E0D2; border-left:3px solid #C98A2B; } — critical items switch the left border to #B4432E" },
+    "LiveDot": { "css": ".live-dot { width:8px; height:8px; border-radius:999px; background:#1F4D3A; animation: breathe 2.4s ease-in-out infinite; }" },
+    "NavCard": { "css": ".nav-card { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px; }" },
+    "HeroCard": {
+      "css": ".hero-card { padding:28px; }",
+      "title": ".hero-title { margin:0; font:700 32px 'Schibsted Grotesk'; line-height:1.1; }",
+      "copy": ".hero-copy { max-width:60ch; color:#C9DAD0; font:15px 'Schibsted Grotesk'; }",
+      "note": "Rendered on the accentPanel (deep green) treatment, cream text — the one deliberate dark hero per page, everything else on the page stays light"
+    },
+    "RailList": { "css": ".rail-list { display:grid; gap:10px; }" }
+  },
+  "routeConsolidation": {
+    "principle": "Same audit finding as before, unchanged rationale: the current app has real duplicate pages doing the same job. One canonical route per function.",
+    "canonical": {
+      "/": "Overview",
+      "/live": "absorbs /monitoring's task-status grid into the same position-panel + task-row treatment used everywhere else",
+      "/logs": "absorbs /alerts via a severity column and filter row on the same table",
+      "/equipment": "unchanged responsibility",
+      "/analytics": "absorbs /statistics (completion-rate becomes a Seal Ring at the top) and /reports (ReportGenerator + report list becomes the export panel at the bottom)",
+      "/scheduler": "unchanged responsibility",
+      "/scheduler/new": "the only session-creation route; app/(dashboard)/sessions/new/page.tsx becomes a 307 redirect here",
+      "/settings": "unchanged responsibility",
+      "/settings/patient": "unchanged responsibility",
+      "/sessions/[sessionId]": "absorbs /recommendations as a 'Clinical Guidance' panel",
+      "/sessions/[sessionId]/live": "deep-link live view for a specific session; /live with no id shows the current/most-recent active session"
+    },
+    "removed_as_standalone_nav_items": ["/monitoring", "/alerts", "/recommendations", "/reports", "/statistics", "/sessions/new"]
+  },
+  "pages": {
+    "/sign-in": {
+      "name": "Sign In",
+      "file": "app/sign-in/[[...sign-in]]/page.tsx",
+      "layout": "Split screen, calmer proportions than the current app: minmax(400px, 1fr) minmax(420px, 1fr) — closer to even",
+      "visualStructure": {
+        "leftPane": [
+          "White background, leaf/drop brand mark + 'Milking Monitor' wordmark",
+          "H1: 'Welcome back' — 32px Schibsted Grotesk 700, sentence case (not the current app's uppercase-feeling two-line title)",
+          "Subtitle: 'Sign in to supervise compliance windows and review operator performance.' (rewritten shorter, calmer)",
+          "EmailSignInForm — pill-radius inputs matching the rest of the system, primary button 'Sign in'",
+          "Link: 'Don't have an account? Create one' to /sign-up, quiet underline"
+        ],
+        "rightPane": {
+          "content": "Deep forest green panel (accentPanel), same /photo.png image at lower opacity (0.25) blended into the green rather than full-bleed with a dark overlay — the photo becomes texture, not the focal point",
+          "headline": "'Every session, verified.' — 40px Schibsted Grotesk 700, cream, no text-shadow",
+          "addition": "A single small Seal Ring card floating bottom-left showing a live compliance score, quiet and small (120px), not the focal element"
+        }
+      },
+      "components": ["EmailSignInForm"]
+    },
+    "/sign-up": {
+      "name": "Sign Up",
+      "file": "app/sign-up/[[...sign-up]]/page.tsx",
+      "layout": "Same split as sign-in",
+      "visualStructure": {
+        "leftPane": "Same brand. H1 'Create your account'. Subtitle: 'Set up a supervisor account to start monitoring compliance and generating reports.' EmailSignUpForm, button 'Create account'. Link: 'Already have an account? Sign in'",
+        "rightPane": "Same green panel treatment, headline 'Built for the whole cooperative.'"
+      },
+      "components": ["EmailSignUpForm"]
+    },
+    "/": {
+      "name": "Overview",
+      "file": "app/(dashboard)/page.tsx",
+      "sections": [
+        { "name": "Hero Card", "class": "card card-pad accent-panel", "layout": "flex, justify-content space-between, gap 24, wrap", "left": "StatusTag (Active/Standby + live-dot), session title 32px, description in #C9DAD0", "right": "Seal Ring (compliance score) — quiet, medium-sized, cream stroke on the green panel" },
+        { "name": "Metric Row", "class": "grid-3", "cards": ["Sessions today", "Active alerts", "Missed tasks"], "eachCard": "card card-pad, .label + plain .metric number — kept as plain numbers here, not rings, since three rings in a row would be busy; rings are reserved for compliance-specific readings" },
+        {
+          "name": "Main Content Grid",
+          "class": "dashboard-grid",
+          "left": { "class": "grid-2", "eachPosition": "card card-pad: header (position label + StatusTag), video-frame with green roi-box, 6 plain check rows (label + StatusTag) for TASK-01..06 — simple rows, no toggle-switch metaphor" },
+          "right": { "name": "Recent activity", "class": "card card-pad", "content": "rail-list of alert-items, 'Open Live View' secondary button linking to /live" }
+        }
+      ]
+    },
+    "/live": {
+      "name": "Live",
+      "file": "app/(dashboard)/live/page.tsx",
+      "realTime": true,
+      "sections": [
+        { "name": "Main Content", "items": [
+          "LiveSessionBanner — accent-panel card, live-dot, elapsed/total timer in tabular-nums, session info, throughput",
+          "grid-2 of 2 position cards: video-frame + green roi-box + 6 plain task rows (StatusTag: Completed=success, Missed=danger, Unverifiable=warning, Pending=neutral) — this is where the former /monitoring tile grid folds in, using the same row treatment as everywhere else",
+          "LiveSessionStream — connection card with a small dot (success/danger) + 'Connected'/'Reconnecting' + last 8 events as plain readable rows, not a raw JSON dump styled as a terminal",
+          "TaskChecklist — same 6 tasks + Override buttons (secondary button style)"
+        ]},
+        { "name": "Sidebar", "class": "card card-pad, sticky top 96px, 360px", "content": "Recent Alerts (rail-list, max 6, StatusTag + time + position + 'View clip'/'Dismiss') + a small Seal Ring for compliance score at the bottom" }
+      ],
+      "components": ["LiveSessionBanner", "LiveSessionStream", "TaskChecklist"]
+    },
+    "/logs": {
+      "name": "Unit Logs",
+      "file": "app/(dashboard)/logs/page.tsx",
+      "sections": [
+        { "name": "Header Card", "content": "Title 'Audit history' + subtitle + filter row as simple pill toggle buttons (All / Critical / Warning) — absorbs the former /alerts view via a severity column" },
+        { "name": "Logs Table", "class": "card card-pad, .table", "columns": ["Severity (StatusTag)", "Cow ID", "Task", "Timestamp", "Assigned employee", "Action (Review, secondary button)"], "emptyState": "Calm centered message: 'No unit logs have been recorded yet.' with a small outlined icon, not a blank space" }
+      ]
+    },
+    "/equipment": {
+      "name": "Equipment",
+      "file": "app/(dashboard)/equipment/page.tsx",
+      "sections": [
+        { "name": "System Status", "class": "grid-2 left card", "content": "EquipmentStatus: 4 services (Inference Service, RTSP Stream, Event Ingestion, YOLO Model) as simple rows with a StatusTag (Online/Offline/Unknown/Checking) — no gauge chips needed here, a tag is enough" },
+        { "name": "Configuration", "class": "grid-2 right card", "content": "rail-list of data-rows: Database (PostgreSQL 16, Connected), Authentication (NextAuth.js, Active), Email Service (Resend status), Realtime Events (SSE, Active)" }
+      ]
+    },
+    "/analytics": {
+      "name": "Analytics",
+      "file": "app/(dashboard)/analytics/page.tsx",
+      "sections": [
+        { "name": "Report Header", "class": "card card-pad", "content": "Reporting period as a simple pill select + ReportGenerator button 'Download full report (.docx)'" },
+        { "name": "Compliance Score + Missed Tasks", "class": "grid-2", "left": "System Compliance Seal Ring (larger, signature size) + side stats: completed sessions, missed tasks, avg duration — absorbs the former /statistics completion-rate number here as the same ring", "right": "Missed Task Frequency as a plain horizontal bar list per task type (flat single-color fill, no VU-meter segments) — simplicity over cleverness" },
+        { "name": "Efficiency + Human Factors", "class": "grid-2", "left": "Operational Efficiency as plain horizontal progress bars with a benchmark tick mark", "right": "Human Factors table: employee, small Seal Ring chip (32px), avg speed, StatusTag" },
+        { "name": "Insight panel", "class": "card card-pad accent-panel", "content": "Plain, calmly-set insight copy (no teletype reveal animation) + 'Review protocol changes' secondary button in cream outline — absorbs the former /reports recent-reports list underneath as a simple list" }
+      ],
+      "components": ["ReportGenerator"]
+    },
+    "/scheduler/new": {
+      "name": "Schedule new session",
+      "file": "app/(dashboard)/scheduler/new/page.tsx",
+      "type": "Client component (MultiStepSessionForm) — canonical route; app/(dashboard)/sessions/new/page.tsx redirects here",
+      "sections": [{ "name": "Session Creation Form", "class": "card card-pad", "content": "MultiStepSessionForm, 4-step wizard, step indicator as simple numbered circles connected by a thin line (current app's approach, kept as-is — it's already clean and doesn't need reinventing) with the active circle filled in accent green" }]
+    },
+    "/sessions/[sessionId]": {
+      "name": "Session detail",
+      "file": "app/(dashboard)/sessions/[sessionId]/page.tsx",
+      "sections": [
+        { "name": "Session Info", "class": "card card-pad", "content": "Session ID, employee name, StatusTag, 'Open live view' secondary button, SessionActions form" },
+        { "name": "Clinical guidance", "content": "Absorbs /recommendations: a small risk-level StatusTag (Low/Elevated/Critical) + guidance copy, plain card, no gradient background" },
+        { "name": "Audit trail", "class": "card card-pad", "content": "Cow processes count, task events count, plain list" }
+      ],
+      "components": ["SessionActions"]
+    },
+    "/sessions/[sessionId]/live": { "name": "Live session view", "file": "app/(dashboard)/sessions/[sessionId]/live/page.tsx", "realTime": true, "components": ["LiveSessionBanner", "LiveSessionStream", "TaskChecklist"] },
+    "/scheduler": {
+      "name": "Scheduler",
+      "file": "app/(dashboard)/scheduler/page.tsx",
+      "sections": [
+        { "name": "Header", "content": "Title + subtitle + 'New session' primary button" },
+        { "name": "Sessions Table", "class": "card card-pad, .table", "columns": ["Session", "Timing", "Operator", "Herd", "Status (StatusTag)", "Action (Open, secondary button)"], "emptyState": "'No sessions scheduled yet.' calm centered message" }
+      ]
+    },
+    "/settings": {
+      "name": "Settings",
+      "file": "app/(dashboard)/settings/page.tsx",
+      "sections": [
+        { "name": "Supervisor Profile", "class": "grid-2 left card", "content": "Profile card + 'Herd settings' secondary button linking to /settings/patient" },
+        { "name": "Clinical threshold", "class": "grid-2 right card", "content": "Plain range slider (accent-green track/thumb, no potentiometer skeuomorphism) for exception sensitivity (20-60, default 32), notification status row with live-dot + 'Enabled' tag, escalation status row" }
+      ]
+    },
+    "/settings/patient": { "name": "Herd settings", "description": "Registered cow ID / RFID table with position assignment, plain table styling" }
+  },
+  "components": {
+    "layout": { "DashboardShell": { "file": "components/layout/dashboard-shell.tsx", "description": "Same wiring as current (useSession(), pageTitleFunction) re-themed per sidebar/topbar specs above; pageTitleFunction updated to canonical routes only" } },
+    "auth": {
+      "EmailSignInForm": { "file": "components/auth/email-sign-in-form.tsx", "fields": ["email", "password"], "actions": "signIn('credentials', {...}) — unchanged", "restyle": "Standard bordered pill inputs matching the rest of the system", "submit": "button-primary 'Sign in' / 'Signing in…'" },
+      "EmailSignUpForm": { "file": "components/auth/email-sign-up-form.tsx", "fields": ["email", "password"], "submit": "button-primary 'Create account' / 'Creating account…'" }
+    },
+    "dashboard": {
+      "LiveSessionBanner": { "file": "components/dashboard/live-session-banner.tsx", "description": "Same timer logic/props — visual layer only: breathing live-dot, tabular-nums timer, on the accent-panel background" },
+      "LiveSessionStream": { "file": "components/dashboard/live-session-stream.tsx", "description": "Same EventSource wiring — re-themed to plain readable event rows instead of a raw <pre> JSON block, to match the calmer register" },
+      "TaskChecklist": { "file": "components/dashboard/task-checklist.tsx", "description": "Same 6 tasks/status set — rows become plain data-rows with StatusTag, Override as a small secondary button opening OverrideModal" },
+      "OverrideModal": { "file": "components/dashboard/override-modal.tsx", "description": "Same PATCH behavior — becomes a true centered dialog with backdrop and focus trap (fixing the current known issue), styled as a plain white card with 12px radius" },
+      "SessionActions": { "file": "components/dashboard/session-actions.tsx", "description": "Same employee reassignment PATCH — plain input styling" },
+      "EquipmentStatus": { "file": "components/dashboard/equipment-status.tsx", "description": "Same 4-service check logic, re-themed to StatusTag rows; underlying no-cors reliability issue should still be fixed, see fixesFromAudit" }
+    },
+    "forms": { "MultiStepSessionForm": { "file": "components/forms/multi-step-session-form/index.tsx", "description": "Same 4 steps/fields/submission — step indicator kept close to the current app's numbered-circle pattern since it already fits this calmer direction" } },
+    "reports": { "ReportGenerator": { "file": "components/reports/report-generator.tsx", "description": "Same POST /api/reports/generate — button re-themed as a plain primary button, no eject animation" } },
+    "providers": { "AuthProvider": { "file": "components/providers/session-provider.tsx", "description": "Unchanged" } }
+  },
+  "apiRoutes": {
+    "/api/auth/[...nextauth]": { "methods": ["GET", "POST"], "description": "Unchanged" },
+    "/api/sessions": { "GET": "Unchanged — 120/min", "POST": "Unchanged — 20/min, creates 2 cow_process records, notifies inference service" },
+    "/api/sessions/[sessionId]/employee": { "PATCH": "Unchanged" },
+    "/api/events/ingest": { "POST": "Unchanged — Bearer auth, 120/min, publishes to SSE broadcast" },
+    "/api/task-events/[taskEventId]/override": { "PATCH": "Unchanged" },
+    "/api/reports/generate": { "POST": "Unchanged" },
+    "/api/ws": { "GET": "Unchanged" }
+  },
+  "database": {
+    "driver": "PostgreSQL via pg (node-postgres) — unchanged",
+    "orm": "Drizzle ORM — unchanged",
+    "tables": "users, accounts, auth_sessions, verification_tokens, sessions, cow_processes, task_events, reports, audit_log — schema untouched by this redesign"
+  },
+  "dataFlow": {
+    "sessionCreation": "Unchanged: MultiStepSessionForm -> POST /api/sessions -> createSession() -> notifySessionWindow()",
+    "inferenceToWeb": "Unchanged: Inference service -> TaskStateMachine -> POST /api/events/ingest -> ingestTaskEvent() -> publish() -> LiveSessionStream",
+    "override": "Unchanged: Override button -> OverrideModal -> PATCH /api/task-events/[id]/override -> audit_log",
+    "reportGeneration": "Unchanged: ReportGenerator -> POST /api/reports/generate -> generateDocxReport() -> createReport()"
+  },
+  "taskDefinitions": {
+    "TASK-01": { "label": "Pre-cleaning", "detectionSignals": ["person", "spray_bottle"] },
+    "TASK-02": { "label": "Stripping", "detectionSignals": ["person", "stripping_cup"] },
+    "TASK-03": { "label": "Machine attachment", "detectionSignals": ["teat_cups_attached"] },
+    "TASK-04": { "label": "Milking", "detectionSignals": ["teat_cups_attached"] },
+    "TASK-05": { "label": "Detachment", "detectionSignals": ["teat_cups_detached"] },
+    "TASK-06": { "label": "Post-dip", "detectionSignals": ["person", "dip_applicator"] }
+  },
+  "complianceScoring": {
+    "baseScore": 96,
+    "missedPenalty": 3,
+    "analyticsPenalty": 2,
+    "formula": "Math.max(0, Math.min(100, 96 - missedCount * 3)) — unchanged",
+    "labels": { ">=90": "Optimal (success ring)", ">=75": "At risk (warning ring)", "<75": "Critical (danger ring)" }
+  },
+  "environmentVariables": {
+    "NEXTAUTH_URL": "http://localhost:3000",
+    "NEXTAUTH_SECRET": "JWT signing secret",
+    "AUTH_SECRET": "NextAuth auth secret",
+    "RESEND_API_KEY": "Resend email service API key",
+    "INFERENCE_SERVICE_URL": "http://localhost:8001",
+    "INFERENCE_SERVICE_TOKEN": "Shared bearer token",
+    "WEB_APP_INGEST_URL": "http://localhost:3000/api/events/ingest",
+    "WEB_APP_INGEST_TOKEN": "Token inference service uses",
+    "RTSP_STREAM_URL": "RTSP camera stream URL",
+    "MODEL_WEIGHTS_PATH": "Path to YOLOv8 weights",
+    "DATABASE_URL": "PostgreSQL connection string"
+  },
+  "responsiveDesign": {
+    "breakpoint": "980px",
+    "behavior": "Unchanged: below 980px sidebar becomes static, single-column grids, topbar stacks, search becomes full width. Seal Rings shrink to a smaller fixed diameter rather than reflowing."
+  },
+  "fixesFromAudit": [
+    "Consolidate duplicate routes per routeConsolidation above",
+    "Sanitize function (lib/security/sanitize.ts) only trims whitespace — add real HTML/XSS sanitization",
+    "Rate limiter is in-memory (Map), resets on restart — move to a shared store if deploying more than one instance",
+    "SSE broadcast is in-memory — needs a shared pub/sub layer for multi-instance production",
+    "OverrideModal is an inline card, not a true modal — implement a real dialog with backdrop and focus trap as part of this redesign",
+    "EquipmentStatus uses no-cors HEAD fetch (always opaque) — replace with a real authenticated health-check endpoint per service",
+    "Auth forms both call signIn('credentials') — wire up the existing EmailProvider magic-link flow into the UI if it's meant to be user-facing"
+  ]
+}

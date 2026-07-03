@@ -25,11 +25,16 @@ export async function POST(request: Request) {
 
   const report = await createReport(parsed.data.session_id, `/reports/${parsed.data.session_id}.docx`);
 
-  return new Response(Buffer.from(docxBuffer), {
-    status: 201,
-    headers: {
-      "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "Content-Disposition": `attachment; filename="report-${parsed.data.session_id}.docx"`,
+  return Response.json({
+    ok: true,
+    route: "reports:generate",
+    data: {
+      report: {
+        id: report.id,
+        session_id: report.session_id,
+        docx_file_url: report.docx_file_url,
+        generated_at: report.generated_at,
+      },
     },
-  });
+  }, { status: 201 });
 }

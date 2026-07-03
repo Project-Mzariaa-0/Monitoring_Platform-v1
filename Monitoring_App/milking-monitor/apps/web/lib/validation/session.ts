@@ -15,7 +15,7 @@ export const createSessionSchema = z.object({
 });
 
 export const updateSessionEmployeeSchema = z.object({
-  employee_id: z.string().uuid(),
+  employee_id: z.string().min(1).max(255),
   employee_name: z.string().min(1).max(255),
   actor_id: z.string().uuid(),
 });

@@ -206,6 +206,27 @@ export async function createSession(input: {
 
   if (!inserted) throw new Error("Failed to insert session");
 
+  await db.insert(cowProcesses).values([
+    {
+      session_id: inserted.id,
+      cow_position: 1,
+      detected_start_time: null,
+      detected_end_time: null,
+      overall_status: "in_progress",
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      session_id: inserted.id,
+      cow_position: 2,
+      detected_start_time: null,
+      detected_end_time: null,
+      overall_status: "in_progress",
+      created_at: now,
+      updated_at: now,
+    },
+  ]);
+
   return {
     id: inserted.id,
     supervisor_id: inserted.supervisor_id,
