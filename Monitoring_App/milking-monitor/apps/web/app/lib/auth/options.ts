@@ -9,7 +9,13 @@ import { db } from "../../../lib/db/client";
 import { users, accounts, authSessions, verificationTokens } from "../../../lib/db/schema";
 import { hashPassword, verifyPassword } from "../../../lib/auth/password";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+let _resend: Resend | null = null;
+function getResend(): Resend {
+  if (!_resend) {
+    _resend = new Resend(process.env.RESEND_API_KEY);
+  }
+  return _resend;
+}
 
 function normalizeFrom() {
   return process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
@@ -46,7 +52,7 @@ async function sendVerificationRequest(
     </div>
   `;
 
-  await resend.emails.send({
+  await getResend().emails.send({
     from: `${normalizeFromName()} <${normalizeFrom()}>`,
     to: [email],
     subject,
