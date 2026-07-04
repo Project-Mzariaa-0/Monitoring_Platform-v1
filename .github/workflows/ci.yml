@@ -118,39 +118,27 @@ jobs:
           CORS_ORIGINS=http://localhost:3000
           EOF
 
-      - name: Start services
-        run: docker compose up -d
+      - name: Start services and wait for health
+        run: docker compose up -d --wait
         timeout-minutes: 5
-
-      - name: Wait for services
-        run: |
-          echo "Waiting for services to be ready..."
-          for i in $(seq 1 30); do
-            if curl -s http://localhost:8001/ > /dev/null 2>&1; then
-              echo "Inference service is ready"
-              break
-            fi
-            echo "Waiting... ($i/30)"
-            sleep 2
-          done
-          for i in $(seq 1 30); do
-            if curl -s http://localhost:3000 > /dev/null 2>&1; then
-              echo "Web app is ready"
-              break
-            fi
-            echo "Waiting... ($i/30)"
-            sleep 2
-          done
 
       - name: Check inference service health
         run: |
-          response=$(curl -s http://localhost:8001/)
+          for i in $(seq 1 15); do
+            response=$(curl -sf http://localhost:8001/ 2>/dev/null) && break
+            echo "Waiting for inference service... ($i/15)"
+            sleep 5
+          done
           echo "Response: $response"
           echo "$response" | grep -q '"status":"ok"'
 
       - name: Check web app responds
         run: |
-          status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/)
+          for i in $(seq 1 15); do
+            status=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:3000/ 2>/dev/null) && break
+            echo "Waiting for web app... ($i/15)"
+            sleep 5
+          done
           echo "Web app status: $status"
           [ "$status" = "200" ] || [ "$status" = "302" ]
 
