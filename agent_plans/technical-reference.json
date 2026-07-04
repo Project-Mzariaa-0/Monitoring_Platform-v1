@@ -1,0 +1,463 @@
+{
+  "_meta": {
+    "purpose": "Technical reference for another LLM to understand this codebase. Explains the full stack, data model, API contracts, file structure, and how the two services (Next.js web app + FastAPI inference service) communicate.",
+    "last_updated": "2026-07-04"
+  },
+
+  "project": {
+    "name": "Milking Process Compliance Monitor",
+    "monorepo_root": "Monitoring_Platform-v1",
+    "app_root": "Monitoring_App/milking-monitor",
+    "description": "Computer-vision pipeline monitoring milking staff compliance. A FastAPI inference service reads an RTSP camera feed, runs YOLOv8 detection, and uses a state machine to infer milking task events. A Next.js web app provides supervisor dashboard, scheduling, live monitoring, analytics, and reporting."
+  },
+
+  "services": {
+    "web": {
+      "path": "apps/web",
+      "framework": "Next.js 15 (App Router)",
+      "runtime": "Node.js 22",
+      "language": "TypeScript",
+      "styling": "Vanilla CSS with custom properties (no Tailwind)",
+      "auth": "NextAuth v4 (CredentialsProvider + EmailProvider via Resend)",
+      "database": "PostgreSQL 16 via Drizzle ORM",
+      "realtime": "Server-Sent Events (SSE) via /api/ws",
+      "port": 3000,
+      "build_command": "npx next build",
+      "dev_command": "npm run dev",
+      "key_dependencies": [
+        "next@15.3.3",
+        "next-auth@4",
+        "@auth/drizzle-adapter",
+        "drizzle-orm",
+        "resend",
+        "docx",
+        "vitest"
+      ]
+    },
+    "inference_service": {
+      "path": "apps/inference-service",
+      "framework": "FastAPI",
+      "runtime": "Python 3.12",
+      "language": "Python",
+      "ml_model": "Ultralytics YOLOv8 (currently COCO pretrained, needs custom training)",
+      "video_processing": "OpenCV (headless)",
+      "port": 8001,
+      "build_command": "pip install -r requirements.txt",
+      "dev_command": "uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload",
+      "key_dependencies": [
+        "fastapi",
+        "uvicorn",
+        "ultralytics",
+        "opencv-python-headless",
+        "httpx",
+        "pydantic",
+        "numpy"
+      ]
+    },
+    "database": {
+      "image": "postgres:16",
+      "port": 5432,
+      "db_name": "milking_monitor",
+      "orm": "Drizzle ORM (TypeScript schema files in apps/web/lib/db/schema/)"
+    }
+  },
+
+  "data_model": {
+    "description": "Hierarchy: Session -> CowProcess -> TaskEvent. Sessions are supervisor-scheduled windows. CowProcesses are auto-detected per camera position. TaskEvents are individual milking tasks detected by the ML pipeline.",
+    "tables": {
+      "sessions": {
+        "description": "A supervisor-scheduled monitoring window. Covers 2 cow positions (camera FOV).",
+        "columns": {
+          "id": "UUID (PK, auto-generated)",
+          "supervisor_id": "text (non-UUID, human-readable)",
+          "employee_id": "text (non-UUID, human-readable)",
+          "employee_name": "text",
+          "supervisor_name": "text",
+          "supervisor_email": "text",
+          "scheduled_start_time": "timestamptz",
+          "estimated_end_time": "timestamptz",
+          "actual_end_time": "timestamptz (nullable)",
+          "row_1_cow_count": "integer",
+          "row_2_cow_count": "integer",
+          "status": "text (scheduled | active | completed | ended_early)",
+          "created_at": "timestamptz",
+          "updated_at": "timestamptz"
+        }
+      },
+      "cow_processes": {
+        "description": "Auto-detected milking process for one cow position within a session. Created by the inference service.",
+        "columns": {
+          "id": "UUID (PK)",
+          "session_id": "UUID (FK -> sessions.id, CASCADE)",
+          "cow_position": "integer (1 or 2)",
+          "detected_start_time": "timestamptz (nullable)",
+          "detected_end_time": "timestamptz (nullable)",
+          "overall_status": "text (in_progress | completed | completed_with_missed_tasks)",
+          "created_at": "timestamptz",
+          "updated_at": "timestamptz"
+        }
+      },
+      "task_events": {
+        "description": "Individual milking task detected by the inference service within a cow process.",
+        "columns": {
+          "id": "UUID (PK)",
+          "cow_process_id": "UUID (FK -> cow_processes.id, CASCADE)",
+          "task_id": "text (TASK-01 through TASK-06)",
+          "detected_start_time": "timestamptz (nullable)",
+          "detected_end_time": "timestamptz (nullable)",
+          "duration_seconds": "integer",
+          "status": "text (completed | missed | anomaly_flagged | unverifiable)",
+          "override_status": "text (nullable, same values as status)",
+          "override_reason": "text (nullable)",
+          "overridden_by": "text (nullable)",
+          "overridden_at": "timestamptz (nullable)",
+          "created_at": "timestamptz"
+        }
+      },
+      "reports": {
+        "description": "Generated DOCX compliance reports for sessions.",
+        "columns": {
+          "id": "UUID (PK)",
+          "session_id": "UUID (FK -> sessions.id)",
+          "generated_at": "timestamptz",
+          "docx_file_url": "text",
+          "email_sent_at": "timestamptz (nullable)"
+        }
+      },
+      "audit_log": {
+        "description": "Audit trail for all state changes (overrides, session edits, etc.).",
+        "columns": {
+          "id": "UUID (PK)",
+          "entity_type": "text (session | task_event)",
+          "entity_id": "UUID",
+          "action": "text (override | edit_employee | create | etc.)",
+          "actor_id": "text",
+          "reason": "text (nullable)",
+          "created_at": "timestamptz"
+        }
+      },
+      "users": {
+        "description": "NextAuth managed table for authentication.",
+        "columns": {
+          "id": "UUID (PK)",
+          "email": "text (unique)",
+          "name": "text (nullable)",
+          "emailVerified": "timestamptz (nullable)",
+          "password_hash": "text (nullable, for credentials login)"
+        }
+      }
+    }
+  },
+
+  "milking_tasks": {
+    "description": "The 6 sequential tasks in a milking process. Each task has a specific detection signal (which YOLO classes must be present).",
+    "tasks": {
+      "TASK-01": {
+        "name": "Pre-cleaning",
+        "detection_signal": ["person", "spray_bottle"],
+        "confidence_threshold": 0.82
+      },
+      "TASK-02": {
+        "name": "Stripping",
+        "detection_signal": ["person", "stripping_cup"],
+        "confidence_threshold": 0.78
+      },
+      "TASK-03": {
+        "name": "Machine attachment",
+        "detection_signal": ["teat_cups_attached"],
+        "confidence_threshold": 0.96
+      },
+      "TASK-04": {
+        "name": "Milking (active extraction)",
+        "detection_signal": ["teat_cups_attached"],
+        "confidence_threshold": 0.91
+      },
+      "TASK-05": {
+        "name": "Detachment",
+        "detection_signal": ["teat_cups_detached"],
+        "confidence_threshold": 0.95
+      },
+      "TASK-06": {
+        "name": "Post-dip",
+        "detection_signal": ["person", "dip_applicator"],
+        "confidence_threshold": 0.80
+      }
+    },
+    "note": "Tasks are detected when ALL required classes are present in the same frame+ROI. Tasks are deduplicated — once completed for a (session, cow_position), they won't fire again."
+  },
+
+  "api_contracts": {
+    "web_app": {
+      "base_url": "http://localhost:3000",
+      "routes": {
+        "POST /api/sessions": {
+          "description": "Create a new session (from multi-step form)",
+          "body": "{ supervisor_id, employee_id, scheduled_start_time, estimated_end_time, row_1_cow_count, row_2_cow_count, employee_name, supervisor_name, supervisor_email }",
+          "returns": "{ data: { id, ...session } }"
+        },
+        "GET /api/sessions": {
+          "description": "List all sessions",
+          "returns": "{ data: SessionRecord[] }"
+        },
+        "GET /api/sessions/[sessionId]": {
+          "description": "Get session detail with cow_processes and task_events",
+          "returns": "{ data: { session, cowProcesses, taskEvents } }"
+        },
+        "PUT /api/sessions/[sessionId]/employee": {
+          "description": "Update assigned employee for a session",
+          "body": "{ employee_id, employee_name }"
+        },
+        "POST /api/events/ingest": {
+          "description": "Inference service pushes task/cow_process events here. Requires Bearer token auth (INFERENCE_SERVICE_TOKEN).",
+          "body": "{ session_id, event_type: 'task_event'|'cow_process', task_id?, cow_position, status, confidence_score, detected_start_time, detected_end_time, duration_seconds }",
+          "returns": "{ ok: true }",
+          "auth": "Bearer token (INFERENCE_SERVICE_TOKEN env var)"
+        },
+        "POST /api/task-events/[taskEventId]/override": {
+          "description": "Supervisor overrides a task event status",
+          "body": "{ override_status, override_reason, actor_id }"
+        },
+        "POST /api/reports/generate": {
+          "description": "Generate DOCX report for a session",
+          "body": "{ session_id }",
+          "returns": "{ report_id, docx_file_url }"
+        },
+        "GET /api/ws": {
+          "description": "SSE endpoint for real-time session updates",
+          "returns": "EventSource stream"
+        }
+      }
+    },
+    "inference_service": {
+      "base_url": "http://localhost:8001",
+      "routes": {
+        "GET /": {
+          "description": "Health check",
+          "returns": "{ status: 'ok' }"
+        },
+        "GET /active-sessions": {
+          "description": "List currently running inference sessions",
+          "returns": "{ sessions: string[] }"
+        },
+        "POST /session-window": {
+          "description": "Start inference for a session",
+          "body": "{ session_id, start_time, end_time, cow_positions: [1,2] }",
+          "returns": "{ status: 'processing', session_id }",
+          "side_effect": "Spawns a background thread running the detection pipeline"
+        },
+        "POST /session-window/{session_id}/stop": {
+          "description": "Stop a running inference session",
+          "returns": "{ status: 'stopping', session_id }"
+        },
+        "POST /test-send": {
+          "description": "Send fake events to test the full pipeline (no camera needed)",
+          "body": "{ session_id, start_time, end_time }",
+          "returns": "{ status: 'ok', sent: 6, session_id }"
+        }
+      }
+    }
+  },
+
+  "inference_pipeline": {
+    "description": "The core ML pipeline running inside the inference service. Processes RTSP camera frames at 5 FPS.",
+    "flow": [
+      "1. RtspReader opens camera stream via OpenCV VideoCapture",
+      "2. ROI Splitter crops each frame into 2 regions (cow_position_1, cow_position_2) using config/rois.json coordinates",
+      "3. YoloDetector runs YOLOv8 inference on each ROI, returns Detection[] with class_name, confidence, bbox",
+      "4. CowProcessBoundaryDetector tracks when teat_cups_attached appears (process start) and teat_cups_detached appears (process end)",
+      "5. TaskStateMachine matches detection class_names against TASK_SIGNALS, emits task_event on match, tracks completed tasks to avoid duplicates",
+      "6. EventPublisher POSTs events to Next.js /api/events/ingest with 3x retry, never crashes the session thread"
+    ],
+    "frame_rate": "5 FPS (configurable via TARGET_FPS in session_runner.py)",
+    "config_files": {
+      "rois.json": "Camera region-of-interest coordinates per cow position",
+      "thresholds.json": "Per-task confidence thresholds and default values"
+    }
+  },
+
+  "event_flow": {
+    "description": "How data flows from camera to supervisor dashboard",
+    "steps": [
+      "1. Camera sends RTSP stream to inference service",
+      "2. Inference service detects objects, runs state machine, emits events via HTTP POST to /api/events/ingest",
+      "3. Web app /api/events/ingest validates auth token, writes to PostgreSQL (sessions, cow_processes, task_events tables)",
+      "4. Web app broadcasts event to connected SSE clients via /api/ws",
+      "5. Supervisor dashboard receives SSE update, re-renders live view with new task status"
+    ]
+  },
+
+  "file_structure": {
+    "description": "Key files and their roles. Use this to navigate the codebase.",
+    "web_app": {
+      "apps/web/app/(dashboard)/page.tsx": "Main dashboard overview (accent-panel hero, metrics, task grid)",
+      "apps/web/app/(dashboard)/live/page.tsx": "Live monitoring view (real-time task status per cow position)",
+      "apps/web/app/(dashboard)/analytics/page.tsx": "Analytics (compliance scores, missed tasks, efficiency)",
+      "apps/web/app/(dashboard)/logs/page.tsx": "Audit log with severity filters",
+      "apps/web/app/(dashboard)/equipment/page.tsx": "System status (inference service, database, camera, model)",
+      "apps/web/app/(dashboard)/scheduler/page.tsx": "Session list table",
+      "apps/web/app/(dashboard)/scheduler/new/page.tsx": "Multi-step session creation form",
+      "apps/web/app/(dashboard)/sessions/[sessionId]/page.tsx": "Session detail with task events and audit trail",
+      "apps/web/app/(dashboard)/settings/page.tsx": "Settings page",
+      "apps/web/app/(dashboard)/settings/patient/page.tsx": "Herd metadata management",
+      "apps/web/app/sign-in/[[...sign-in]]/page.tsx": "Sign-in page (split-screen, green accent)",
+      "apps/web/app/sign-up/[[...sign-up]]/page.tsx": "Sign-up page",
+      "apps/web/app/api/events/ingest/route.ts": "Event ingestion endpoint (inference service -> DB)",
+      "apps/web/app/api/sessions/route.ts": "Session CRUD",
+      "apps/web/app/api/sessions/[sessionId]/employee/route.ts": "Update session employee",
+      "apps/web/app/api/task-events/[taskEventId]/override/route.ts": "Override task status",
+      "apps/web/app/api/reports/generate/route.ts": "Generate DOCX report",
+      "apps/web/app/api/ws/route.ts": "SSE real-time endpoint",
+      "apps/web/app/api/auth/[...nextauth]/route.ts": "NextAuth handler",
+      "apps/web/components/layout/dashboard-shell.tsx": "Main layout with green sidebar (#1F4D3A) and navigation",
+      "apps/web/components/dashboard/live-session-banner.tsx": "Active session banner with live timer",
+      "apps/web/components/dashboard/live-session-stream.tsx": "Real-time event stream display",
+      "apps/web/components/dashboard/task-checklist.tsx": "Task completion checklist with override buttons",
+      "apps/web/components/dashboard/override-modal.tsx": "Dialog for supervisor to override task status",
+      "apps/web/components/dashboard/equipment-status.tsx": "System service status display",
+      "apps/web/components/ui/seal-ring.tsx": "SVG circular progress ring (signature component)",
+      "apps/web/components/ui/status-tag.tsx": "Status pill replacement (success/warning/danger/neutral)",
+      "apps/web/components/forms/multi-step-session-form/index.tsx": "4-step session creation form",
+      "apps/web/lib/constants.ts": "TASK_IDS, TASK_LABELS, compliance scoring helpers",
+      "apps/web/lib/data/store.ts": "All database access functions (649 lines, wraps Drizzle queries)",
+      "apps/web/lib/db/client.ts": "PostgreSQL connection pool (max: 10, idle timeout: 30s)",
+      "apps/web/lib/db/schema/": "Drizzle ORM schema files (sessions, cow_processes, task_events, etc.)",
+      "apps/web/lib/security/sanitize.ts": "HTML entity escaping for user input",
+      "apps/web/lib/security/rate-limit.ts": "In-memory rate limiter with periodic cleanup",
+      "apps/web/lib/auth/options.ts": "NextAuth config (CredentialsProvider, EmailProvider, JWT strategy)",
+      "apps/web/lib/auth/password.ts": "Password hashing (bcrypt)",
+      "apps/web/middleware.ts": "Route protection (requires auth for all routes except /sign-in, /sign-up, /api/auth)",
+      "apps/web/app/globals.css": "All CSS design tokens (Cooperative theme: #F7F5EF canvas, #1F4D3A sidebar, Schibsted Grotesk font)",
+      "apps/web/vitest.config.ts": "Vitest test configuration"
+    },
+    "inference_service": {
+      "apps/inference-service/src/main.py": "FastAPI app with 5 endpoints, session management, thread safety",
+      "apps/inference-service/src/runtime/session_runner.py": "Main pipeline loop: read frame -> split ROI -> detect -> state machine -> publish (5 FPS)",
+      "apps/inference-service/src/detection/yolo_detector.py": "YOLOv8 inference wrapper, Detection dataclass",
+      "apps/inference-service/src/ingestion/rtsp_reader.py": "OpenCV RTSP stream reader (generator)",
+      "apps/inference-service/src/ingestion/roi_splitter.py": "NumPy-based frame cropping into ROI regions",
+      "apps/inference-service/src/state_machine/task_state_machine.py": "6-task FSM: maps YOLO detections to task lifecycle events",
+      "apps/inference-service/src/state_machine/cow_process_boundary.py": "Cow process start/end detection (teat_cups_attached/detached)",
+      "apps/inference-service/src/events/event_builder.py": "Build task_event and cow_process event payloads",
+      "apps/inference-service/src/events/publisher.py": "HTTP POST publisher with 3x retry, never crashes session thread",
+      "apps/inference-service/src/config/rois.json": "Camera ROI coordinates (two 640x720 regions)",
+      "apps/inference-service/src/config/thresholds.json": "Per-task confidence thresholds",
+      "apps/inference-service/tests/": "19 tests (pytest): state machine, ROI splitter, API health, event contracts"
+    },
+    "config": {
+      "docker-compose.yml": "Postgres + web + inference-service (uses env vars, no hardcoded secrets)",
+      ".github/workflows/ci.yml": "CI: web-checks (tsc, lint, build, vitest), inference-checks (ruff, pytest), integration (docker smoke test)",
+      ".gitignore": "Root gitignore for secrets, node_modules, __pycache__, .next"
+    }
+  },
+
+  "design_system": {
+    "description": "Cooperative theme — calm, minimal, premium-cooperative aesthetic.",
+    "tokens": {
+      "canvas": "#F7F5EF",
+      "surface": "#FFFFFF",
+      "sidebar": "#1F4D3A",
+      "sidebar_text": "#D8E6DC",
+      "active_nav": "rgba(255,255,255,0.14)",
+      "text_primary": "#20261F",
+      "text_secondary": "#5C6B5D",
+      "text_muted": "#8B968B",
+      "border": "#E4E0D2",
+      "accent": "#1F4D3A",
+      "accent_soft": "#E3ECE5",
+      "warning": "#C98A2B",
+      "danger": "#B4432E",
+      "radius_card": "12px",
+      "radius_button": "8px",
+      "radius_pill": "999px",
+      "font_family": "Schibsted Grotesk (weights 400, 500, 600, 700)"
+    },
+    "signature_component": "SealRing — SVG circular progress ring with animated fill, used for compliance scores",
+    "css_classes": {
+      "card": "White card with 1px border, 12px radius",
+      "accent-panel": "Green background (#1F4D3A), cream text",
+      "status_tag": "Pill-shaped status indicator (success/warning/danger/neutral)",
+      "metric": "Large number display in Schibsted Grotesk 700, tabular-nums",
+      "label": "Uppercase Schibsted Grotesk 600, small size",
+      "data_row": "Flex row with label and value, used for lists",
+      "rail_list": "Vertical list of items",
+      "button_primary": "Green fill, white text, 8px radius",
+      "button_secondary": "White fill, bordered, 8px radius"
+    }
+  },
+
+  "environment_variables": {
+    "web_app": {
+      "DATABASE_URL": "PostgreSQL connection string (required)",
+      "AUTH_SECRET": "NextAuth secret (required)",
+      "NEXTAUTH_SECRET": "NextAuth secret (required, can equal AUTH_SECRET)",
+      "NEXTAUTH_URL": "Base URL (required, e.g. http://localhost:3000)",
+      "INFERENCE_SERVICE_TOKEN": "Bearer token for authenticating inference service events (required)",
+      "RESEND_API_KEY": "Resend API key for email provider (optional, lazy-loaded)",
+      "RESEND_FROM_EMAIL": "Sender email address (optional, default: onboarding@resend.dev)",
+      "RESEND_FROM_NAME": "Sender name (optional, default: Milking Monitor)"
+    },
+    "inference_service": {
+      "RTSP_STREAM_URL": "Camera RTSP stream URL (required for inference)",
+      "WEB_APP_INGEST_URL": "Web app ingest endpoint (required, e.g. http://localhost:3000/api/events/ingest)",
+      "WEB_APP_INGEST_TOKEN": "Bearer token matching INFERENCE_SERVICE_TOKEN (required)",
+      "MODEL_WEIGHTS_PATH": "Path to YOLOv8 weights (optional, default: yolov8n.pt)",
+      "CORS_ORIGINS": "Comma-separated CORS origins (optional, default: http://localhost:3000)"
+    },
+    "docker": {
+      "POSTGRES_DB": "Database name (optional, default: milking_monitor)",
+      "POSTGRES_USER": "Postgres user (optional, default: postgres)",
+      "POSTGRES_PASSWORD": "Postgres password (REQUIRED, must be set in .env)"
+    }
+  },
+
+  "testing": {
+    "web_app": {
+      "framework": "Vitest",
+      "config": "apps/web/vitest.config.ts",
+      "run": "npx vitest run",
+      "tests": {
+        "lib/__tests__/constants.test.ts": "14 tests — compliance scoring, labels, formatting",
+        "lib/__tests__/sanitize.test.ts": "9 tests — HTML entity escaping"
+      }
+    },
+    "inference_service": {
+      "framework": "pytest",
+      "config": "pyproject.toml",
+      "run": "pytest tests/ -v",
+      "tests": {
+        "tests/unit/test_task_state_machine.py": "7 tests — signal matching, dedup, positions, duration, confidence",
+        "tests/unit/test_roi_splitter.py": "4 tests — frame splitting, cropping, value preservation",
+        "tests/api/test_health.py": "4 tests — health endpoint, active sessions, 404, 400",
+        "tests/integration/test_event_contract.py": "4 tests — event builder payloads"
+      }
+    }
+  },
+
+  "ci_cd": {
+    "provider": "GitHub Actions",
+    "workflow": ".github/workflows/ci.yml",
+    "trigger": "Push to main/dev, PRs to main",
+    "jobs": {
+      "web-checks": "TypeScript check, ESLint, Next.js build, Vitest tests",
+      "inference-checks": "Ruff lint, Pytest tests",
+      "integration-checks": "Docker Compose smoke test (health checks, curl endpoints)"
+    }
+  },
+
+  "known_issues": [
+    "YOLO model uses COCO pretrained weights — detects 'person' but not milking-specific classes (spray_bottle, stripping_cup, teat_cups_attached, teat_cups_detached, dip_applicator). Custom training required.",
+    "Only 2 cow positions monitored (camera FOV limitation). Full-row coverage is Phase 2.",
+    "Rate limiting and SSE broadcast are in-memory (Map) — won't survive restarts or scale.",
+    "Events/ingest DB write failure is swallowed (intentional — event still broadcast via SSE).",
+    "next lint is deprecated in Next.js 15, will be removed in 16. ESLint config uses flat config format (eslint.config.mjs)."
+  ],
+
+  "conventions_for_new_code": {
+    "typescript": "Use existing patterns in lib/data/store.ts for DB queries. All functions return Promise<RecordType>.",
+    "python": "Use existing patterns in src/state_machine/ for state logic. All public methods return list[dict] (events).",
+    "css": "Use design tokens from globals.css. No inline styles for colors — use CSS variables.",
+    "components": "Check existing components in components/dashboard/ before creating new ones.",
+    "api_routes": "Use existing auth pattern (Bearer token for ingest, NextAuth session for dashboard).",
+    "tests": "Add tests for new functionality. JS: vitest in lib/__tests__/. Python: pytest in tests/unit/ or tests/api/."
+  }
+}
