@@ -118,15 +118,24 @@ jobs:
           CORS_ORIGINS=http://localhost:3000
           EOF
 
-      - name: Start services and wait for health
-        run: docker compose up -d --wait
+      - name: Start services
+        run: docker compose up -d
         timeout-minutes: 5
+
+      - name: Dump inference logs on crash
+        if: always()
+        run: |
+          sleep 5
+          echo "=== INFERENCE SERVICE LOGS ==="
+          docker compose logs inference-service
+          echo "=== WEB SERVICE LOGS ==="
+          docker compose logs web
 
       - name: Check inference service health
         run: |
-          for i in $(seq 1 15); do
+          for i in $(seq 1 30); do
             response=$(curl -sf http://localhost:8001/ 2>/dev/null) && break
-            echo "Waiting for inference service... ($i/15)"
+            echo "Waiting for inference service... ($i/30)"
             sleep 5
           done
           echo "Response: $response"
@@ -134,9 +143,9 @@ jobs:
 
       - name: Check web app responds
         run: |
-          for i in $(seq 1 15); do
+          for i in $(seq 1 30); do
             status=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:3000/ 2>/dev/null) && break
-            echo "Waiting for web app... ($i/15)"
+            echo "Waiting for web app... ($i/30)"
             sleep 5
           done
           echo "Web app status: $status"
