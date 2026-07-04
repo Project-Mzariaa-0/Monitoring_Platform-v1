@@ -90,6 +90,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Create .env for docker compose
+        run: |
+          cat > .env << 'EOF'
+          POSTGRES_DB=milking_monitor
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=postgres
+          EOF
+
       - name: Create .env.local for web
         run: |
           cat > apps/web/.env.local << 'EOF'
