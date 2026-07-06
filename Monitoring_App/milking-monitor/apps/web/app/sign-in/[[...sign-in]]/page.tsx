@@ -1,5 +1,6 @@
 import Link from "next/link";
 import EmailSignInForm from "../../../components/auth/email-sign-in-form";
+import { AuthFeatures } from "../../../components/auth/auth-features";
 
 export default function SignInPage() {
   return (
@@ -19,7 +20,10 @@ export default function SignInPage() {
         </div>
       </section>
       <section className="auth-visual">
-        <div className="auth-headline">Realtime compliance for every milking position.</div>
+        <div style={{ position: "relative", zIndex: 2, width: "100%", display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div className="auth-headline">Realtime compliance for every milking position.</div>
+          <AuthFeatures />
+        </div>
         <div className="floating-score">
           <span className="label" style={{ color: "#c7cdd9" }}>
             Live compliance score

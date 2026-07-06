@@ -1,5 +1,6 @@
 import Link from "next/link";
 import EmailSignUpForm from "../../../components/auth/email-sign-up-form";
+import { AuthFeatures } from "../../../components/auth/auth-features";
 
 export default function SignUpPage() {
   return (
@@ -19,7 +20,10 @@ export default function SignUpPage() {
         </div>
       </section>
       <section className="auth-visual">
-        <div className="auth-headline">Build a complete audit trail from every session.</div>
+        <div style={{ position: "relative", zIndex: 2, width: "100%", display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div className="auth-headline">Build a complete audit trail from every session.</div>
+          <AuthFeatures />
+        </div>
         <div className="floating-score">
           <span className="label" style={{ color: "#c7cdd9" }}>
             Unit readiness
