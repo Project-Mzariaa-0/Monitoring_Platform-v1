@@ -1,0 +1,67 @@
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--neutral-soft) 0%,
+    #F5F4F0 50%,
+    var(--neutral-soft) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+.skeletonCard {
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.skeletonRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  animation: reveal-up 400ms ease-out;
+}
+
+.skeletonRow:nth-child(1) { animation-delay: 0ms; }
+.skeletonRow:nth-child(2) { animation-delay: 40ms; }
+.skeletonRow:nth-child(3) { animation-delay: 80ms; }
+.skeletonRow:nth-child(4) { animation-delay: 120ms; }
+.skeletonRow:nth-child(5) { animation-delay: 160ms; }
+
+.skeletonList {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 20px;
+  overflow: hidden;
+}
+
+.skeletonCircle {
+  border-radius: 999px;
+}
+
+.skeletonBar {
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.skeletonText {
+  display: grid;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer {
+    animation: none;
+    opacity: 0.6;
+  }
+  
+  .skeletonRow {
+    animation: none;
+  }
+}

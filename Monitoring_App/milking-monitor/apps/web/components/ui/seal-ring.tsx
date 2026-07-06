@@ -1,3 +1,5 @@
+'use client'
+
 import * as React from 'react'
 
 interface SealRingProps {
@@ -7,6 +9,7 @@ interface SealRingProps {
   label?: string
   color?: string
   className?: string
+  animateOnMount?: boolean
 }
 
 export function SealRing({
@@ -16,7 +19,9 @@ export function SealRing({
   label,
   color,
   className,
+  animateOnMount = true,
 }: SealRingProps) {
+  const [mounted, setMounted] = React.useState(animateOnMount)
   const clamped = Math.max(0, Math.min(100, value))
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
@@ -31,7 +36,11 @@ export function SealRing({
   return (
     <div
       className={`seal-ring-container ${className ?? ''}`}
-      style={{ width: size, height: size + (label ? 20 : 0) }}
+      style={{
+        width: size,
+        height: size + (label ? 20 : 0),
+        animation: mounted ? 'spring-scale 500ms cubic-bezier(0.34, 1.56, 0.64, 1) both' : 'none',
+      }}
     >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <circle
@@ -53,7 +62,7 @@ export function SealRing({
           strokeDashoffset={offset}
           strokeLinecap="round"
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
-          style={{ transition: 'stroke-dashoffset 400ms ease-out' }}
+          style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.34, 1.56, 0.64, 1)' }}
         />
         <text
           x="50%"
