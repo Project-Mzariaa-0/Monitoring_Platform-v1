@@ -5,19 +5,18 @@ export default function SignUpPage() {
   return (
     <div className="auth-shell">
       <section className="auth-pane">
-        <Link className="brand" href="/" style={{ marginBottom: 48, padding: 0 }}>
-          <span className="brand-mark">M</span>
-          <span className="brand-name" style={{ color: "var(--text-primary)" }}>
-            Milking Monitor
-          </span>
+        <Link className="brand" href="/" style={{ padding: 0, alignSelf: "center", marginTop: 24, marginBottom: "auto" }}>
+          <img src="/logo12.png" alt="Milking Monitor" className="brand-logo brand-logo-auth" />
         </Link>
-        <h1 className="page-title" style={{ marginBottom: 8 }}>
-          Get started
-        </h1>
-        <p className="muted" style={{ marginTop: 0, marginBottom: 28 }}>
-          Create a supervisor account for your compliance monitoring unit.
-        </p>
-        <EmailSignUpForm />
+        <div style={{ marginBottom: "auto", marginTop: -120, width: "100%", maxWidth: 420, alignSelf: "center" }}>
+          <h1 className="page-title" style={{ marginBottom: 8 }}>
+            Get started
+          </h1>
+          <p className="muted" style={{ marginTop: 0, marginBottom: 28 }}>
+            Create a supervisor account for your compliance monitoring unit.
+          </p>
+          <EmailSignUpForm />
+        </div>
       </section>
       <section className="auth-visual">
         <div className="auth-headline">Build a complete audit trail from every session.</div>

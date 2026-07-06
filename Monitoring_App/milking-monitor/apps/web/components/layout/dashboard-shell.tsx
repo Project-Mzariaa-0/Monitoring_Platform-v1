@@ -49,13 +49,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
     <div className="app-layout">
       <aside className="sidebar">
         <Link href="/" className="brand" aria-label="Milking Monitor dashboard">
-          <span className="brand-mark">M</span>
-          <span>
-            <span className="brand-name">Milking Monitor</span>
-            <span className="brand-subtitle" style={{ display: "block" }}>
-              Compliance Unit
-            </span>
-          </span>
+          <img src="/logo12.png" alt="Milking Monitor" className="brand-logo brand-logo-sidebar" />
         </Link>
 
         <span className="small-muted" style={{ paddingLeft: 8 }}>Dashboard</span>

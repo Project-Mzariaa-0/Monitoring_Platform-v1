@@ -73,6 +73,7 @@ button { cursor: pointer; }
 .brand {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 12px;
   padding: 0 8px;
 }
@@ -88,6 +89,23 @@ button { cursor: pointer; }
   font-family: 'Schibsted Grotesk', sans-serif;
   font-weight: 700;
   font-size: 16px;
+}
+
+.brand-logo {
+  height: 80px;
+  width: auto;
+  object-fit: contain;
+}
+
+.brand-logo-auth {
+  height: 180px;
+  margin-top: 24px;
+  margin-bottom: auto;
+}
+
+.brand-logo-sidebar {
+  height: 160px;
+  filter: brightness(0) invert(1);
 }
 
 .brand-name {
