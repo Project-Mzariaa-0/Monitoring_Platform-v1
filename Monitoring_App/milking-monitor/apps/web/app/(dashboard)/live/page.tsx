@@ -2,6 +2,7 @@ import Link from "next/link";
 import LiveSessionBanner from "../../../components/dashboard/live-session-banner";
 import LiveSessionStream from "../../../components/dashboard/live-session-stream";
 import TaskChecklist from "../../../components/dashboard/task-checklist";
+import Go2rtcPlayer from "../../../components/dashboard/go2rtc-player";
 import { getMonitoringOverview } from "../../../lib/data/store";
 import { TASK_LABELS, TASK_ORDER, complianceScore } from "../../../lib/constants";
 
@@ -53,9 +54,10 @@ export default async function LivePage() {
                     {hasViolation ? "Violation" : overview.activeSession ? "Milking" : "Standby"}
                   </span>
                 </div>
-                <div className="video-frame">
-                  <div className="roi-box" />
-                </div>
+                <Go2rtcPlayer
+                  src={`camera${position}`}
+                  style={{ height: 220, borderRadius: 10 }}
+                />
                 <div style={{ marginTop: 14 }}>
                   {TASK_ORDER.map((taskId) => {
                     const event = positionTasks.find((t) => t.task_id === taskId);

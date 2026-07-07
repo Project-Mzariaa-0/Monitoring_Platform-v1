@@ -1,0 +1,19 @@
+api:
+  listen: ":1984"
+  origin: "*"
+  ssl: false
+
+streams:
+  camera1: rtsp://admin:winservice@45.216.19.222:554/Streaming/Channels/101
+  camera2: rtsp://admin:winservice@45.216.19.222:554/Streaming/Channels/102
+
+webrtc:
+  listen: ":8555"
+  candidates:
+    - stun:8555
+
+rtsp:
+  listen: ":8554"
+
+log:
+  level: info

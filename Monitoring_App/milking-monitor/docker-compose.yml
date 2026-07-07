@@ -15,6 +15,20 @@ services:
       timeout: 3s
       retries: 10
 
+  go2rtc:
+    image: alexxit/go2rtc
+    container_name: go2rtc
+    restart: unless-stopped
+    ports:
+      - "1984:1984"
+      - "8554:8554"
+      - "8555:8555/tcp"
+      - "8555:8555/udp"
+    volumes:
+      - ./apps/go2rtc/go2rtc.yaml:/config/go2rtc.yaml
+    environment:
+      - TZ=UTC
+
   web:
     image: node:22-alpine
     working_dir: /workspace/apps/web
@@ -42,6 +56,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      go2rtc:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/')\""]
       interval: 10s
