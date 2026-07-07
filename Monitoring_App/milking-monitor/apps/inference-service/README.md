@@ -207,6 +207,31 @@ docker compose up inference-service
 
 The service starts on port 8001 and reads config from `.env`.
 
+### Running with go2rtc (full stack)
+
+```bash
+# From the milking-monitor/ directory
+docker compose up -d
+```
+
+This starts all 4 services: PostgreSQL, go2rtc, web app, and inference service.
+
+### Running standalone (without Docker)
+
+```bash
+# Terminal 1: Start go2rtc (if you have it installed)
+go2rtc -config apps/go2rtc/go2rtc.yaml
+
+# Terminal 2: Start the web app
+cd apps/web
+npm install && npm run dev
+
+# Terminal 3: Start the inference service
+cd apps/inference-service
+pip install -r requirements.txt
+uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload
+```
+
 ## Testing
 
 ### Run all tests

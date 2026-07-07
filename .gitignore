@@ -10,10 +10,32 @@ dist/
 build/
 __pycache__/
 *.pyc
-.inference-service/.venv/
-.inference-service/models/
+.venv/
 *.pt
 *.pth
 *.onnx
 .DS_Store
 Thumbs.db
+
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# go2rtc binaries
+**/go2rtc.exe
+
+# ML spike experiments (local only)
+ml-spike/ayman/
+ml-spike/data/
+ml-spike/runs/
+
+# Generated reports
+Monitoring_App/milking-monitor/apps/web/public/reports/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
