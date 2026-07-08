@@ -1,4 +1,4 @@
-import { desc, eq, inArray, and } from "drizzle-orm";
+import { desc, eq, inArray, and, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { sessions, cowProcesses, taskEvents, reports, auditLog, supervisors, employees } from "../db/schema";
 import { TASK_LABELS } from "../constants";
@@ -70,6 +70,14 @@ function toISO(value: Date | string | null): string | null {
 }
 
 export async function listSessions(): Promise<SessionRecord[]> {
+  const now = new Date().toISOString();
+
+  // Auto-complete sessions past their estimated end time
+  await db
+    .update(sessions)
+    .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
+    .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} < ${now}`));
+
   const rows = await db.select().from(sessions).orderBy(desc(sessions.created_at));
   return rows.map((r) => ({
     id: r.id,
@@ -90,6 +98,14 @@ export async function listSessions(): Promise<SessionRecord[]> {
 }
 
 export async function getSession(sessionId: string): Promise<SessionRecord | null> {
+  const now = new Date().toISOString();
+
+  // Auto-complete if past estimated end time
+  await db
+    .update(sessions)
+    .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
+    .where(and(eq(sessions.id, sessionId), inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} < ${now}`));
+
   const [row] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
   if (!row) return null;
   return {
