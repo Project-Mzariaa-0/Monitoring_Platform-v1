@@ -1,33 +1,69 @@
-# ML Feasibility Spike
+# Auto-Annotation Pipeline
 
-This spike answers one question: can a fixed side camera plus a YOLOv8-based detector and a simple rule-based state machine detect the six milking tasks with usable confidence at the current camera angle?
+Fast annotation for 400+ images using YOLO.
 
-## Scope
+## Quick Start (Recommended)
 
-- Input: short sample clips from the actual camera view
-- Output: raw detections, candidate task events, and a small evaluation summary
-- Non-goals: app code, database persistence, authentication, production hardening, final model thresholds
+### Option 1: Few-Shot Learning (Fastest)
 
-## Expected folder layout
+```bash
+# Step 1: Select 25 images for manual annotation
+python src/quick_annotate.py --raw-dir data/raw --num-samples 25
 
-- `data/raw_clips/` sample footage clips
-- `data/ground_truth/` human-labeled task timing files
-- `data/rois.json` ROI definitions for the two monitored cow positions
-- `models/` local YOLOv8 weights or pretrained checkpoints
-- `results/` generated detections, task events, evaluations, and summary notes
-- `src/detect_objects.py` frame-by-frame detection runner
-- `src/state_machine.py` rule-based task inference
-- `src/evaluate.py` comparison against human labels
+# Step 2: Manually annotate the 25 images in data/manual/
+# Use LabelImg, Roboflow, or any YOLO-compatible tool
 
-## How to use
+# Step 3: Train a quick model
+python src/auto_annotate.py --input data/manual --output data/auto_labeled --epochs 50
 
-1. Put sample clips in `data/raw_clips/`.
-2. Define the two ROIs in `data/rois.json`.
-3. Add human labels in `data/ground_truth/`.
-4. Run detection to generate raw per-frame detections.
-5. Run the state machine to convert detections into task events.
-6. Run evaluation to compare predicted events against labels.
+# Step 4: Merge and create final dataset
+python src/quick_annotate.py --raw-dir data/raw --labeled-dir data/manual --auto-dir data/auto_labeled --merge --output data/final
 
-## Goal of the spike
+# Step 5: Train final model
+yolo detect train data=data/final/dataset.yaml epochs=100 imgsz=640
+```
 
-The spike is successful if it shows a usable signal for the six tasks and clearly identifies where occlusion makes the camera angle unreliable.
+### Option 2: Zero-Shot (No Training)
+
+Requires Grounding DINO (slower but no manual annotation):
+
+```bash
+python src/auto_annotate.py --input data/raw --output data/labeled --method grounding --classes person spray_bottle teat_cups
+```
+
+## Requirements
+
+```bash
+pip install ultralytics Pillow
+```
+
+For zero-shot method:
+```bash
+pip install autodistill autodistill-grounded-sam autodistill-yolov8
+```
+
+## Directory Structure
+
+```
+data/
+├── raw/                    # Your 400 raw images
+├── manual/                 # 25 manually annotated images
+├── auto_labeled/           # Auto-labeled by model
+└── final/                  # Merged dataset for training
+    ├── images/
+    ├── labels/
+    └── dataset.yaml
+```
+
+## Annotation Tools
+
+- **LabelImg**: `pip install labelImg && labelImg`
+- **Roboflow**: https://roboflow.com (free tier available)
+- **CVAT**: https://cvat.ai (open source)
+
+## Tips
+
+1. Start with 25-30 diverse images (different angles, lighting)
+2. Include edge cases (partial views, occlusions)
+3. Review auto-labels before final training
+4. Iterate: train → auto-label → review → retrain
