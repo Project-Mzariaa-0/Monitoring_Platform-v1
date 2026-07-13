@@ -7,8 +7,8 @@ streams:
   camera1: rtsp://admin:winservice@45.218.147.209:554/Streaming/Channels/101
   camera2: rtsp://admin:winservice@45.218.147.209:554/Streaming/Channels/102
   # Fallback streams (loop local video when live camera is unreachable)
-  fallback1: "ffmpeg:full_clip.mp4 -re -stream_loop -1 -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f rtsp {output}"
-  fallback2: "ffmpeg:full_clip.mp4 -re -stream_loop -1 -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f rtsp {output}"
+  fallback1: "ffmpeg:C:/Users/pc/Desktop/Monitoring_Platform-v1/Monitoring_App/milking-monitor/apps/go2rtc/full_clip.mp4 -re -stream_loop -1 -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f rtsp {output}"
+  fallback2: "ffmpeg:C:/Users/pc/Desktop/Monitoring_Platform-v1/Monitoring_App/milking-monitor/apps/go2rtc/full_clip.mp4 -re -stream_loop -1 -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f rtsp {output}"
 
 webrtc:
   listen: ":8555"
