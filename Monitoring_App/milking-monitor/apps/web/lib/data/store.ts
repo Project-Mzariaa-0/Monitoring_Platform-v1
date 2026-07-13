@@ -471,14 +471,20 @@ export async function getMonitoringOverview(): Promise<{
   activeCount: number;
   missedCount: number;
 }> {
+  const now = new Date().toISOString();
+
+  // Auto-complete sessions 30 minutes after their estimated end time
+  await db
+    .update(sessions)
+    .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
+    .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+
   const totalSessionRows = await db.select().from(sessions);
   const totalSessions = totalSessionRows.length;
   const activeCount = totalSessionRows.filter((s) => s.status === "active").length;
 
   const activeSessionRow =
-    (await db.select().from(sessions).where(eq(sessions.status, "active")).orderBy(desc(sessions.updated_at)).limit(1)).at(0) ??
-    (await db.select().from(sessions).orderBy(desc(sessions.created_at)).limit(1)).at(0) ??
-    null;
+    (await db.select().from(sessions).where(eq(sessions.status, "active")).orderBy(desc(sessions.updated_at)).limit(1)).at(0) ?? null;
 
   const activeSession: SessionRecord | null = activeSessionRow
     ? {
