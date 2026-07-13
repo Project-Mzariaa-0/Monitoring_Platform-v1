@@ -28,6 +28,7 @@ class SessionRunner:
     weights_path: str
     rois: dict
     thresholds: dict
+    fallback_video_path: str | None = None
     stop_event: threading.Event = field(default_factory=threading.Event)
 
     def run(self) -> None:
@@ -36,7 +37,7 @@ class SessionRunner:
         reader = None
         publisher = None
         try:
-            reader = RtspReader(self.stream_url)
+            reader = RtspReader(self.stream_url, self.fallback_video_path)
             detector = YoloDetector(self.weights_path)
             task_state_machine = TaskStateMachine(self.thresholds)
             boundary_detector = CowProcessBoundaryDetector(self.thresholds)

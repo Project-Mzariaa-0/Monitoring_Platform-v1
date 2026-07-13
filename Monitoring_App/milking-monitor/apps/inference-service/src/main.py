@@ -74,6 +74,8 @@ def receive_session_window(payload: SessionWindowPayload) -> dict[str, str]:
     if not stream_url:
         raise HTTPException(status_code=400, detail="RTSP_STREAM_URL is not configured")
 
+    fallback_video_path = os.getenv("FALLBACK_VIDEO_PATH")
+
     ingest_url = os.getenv("WEB_APP_INGEST_URL")
     ingest_token = os.getenv("WEB_APP_INGEST_TOKEN")
     if not ingest_url or not ingest_token:
@@ -89,6 +91,7 @@ def receive_session_window(payload: SessionWindowPayload) -> dict[str, str]:
     runner = SessionRunner(
         session_id=payload.session_id,
         stream_url=stream_url,
+        fallback_video_path=fallback_video_path,
         ingest_url=ingest_url,
         ingest_token=ingest_token,
         weights_path=weights_path,
