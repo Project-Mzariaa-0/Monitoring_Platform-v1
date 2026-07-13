@@ -23,12 +23,13 @@ const CONNECT_TIMEOUT_MS = 8000;
 
 export default function Go2rtcPlayer({ src = "camera1", fallbackSrc, className, style }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const fallbackVideoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"loading" | "connected" | "fallback" | "error">("loading");
   const [streamInfo, setStreamInfo] = useState<Go2rtcStream | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const usingFallback = useRef(false);
+  const connectedRef = useRef(false);
   const cancelledRef = useRef(false);
 
   const cleanup = useCallback(() => {
@@ -42,133 +43,179 @@ export default function Go2rtcPlayer({ src = "camera1", fallbackSrc, className, 
     }
   }, []);
 
-  const connectTo = useCallback(async (streamSrc: string) => {
+  const activateFallback = useCallback(() => {
+    if (cancelledRef.current) return;
+    connectedRef.current = true;
     cleanup();
-    cancelledRef.current = false;
-
-    try {
-      setStatus("loading");
-
-      const res = await fetch(`/api/go2rtc?src=${streamSrc}`);
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to get stream info");
-      }
-
-      if (cancelledRef.current) return;
-
-      const info: Go2rtcStream = await res.json();
-      setStreamInfo(info);
-
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
-      pcRef.current = pc;
-
-      pc.addTransceiver("video", { direction: "recvonly" });
-      pc.addTransceiver("audio", { direction: "recvonly" });
-
-      pc.ontrack = (event) => {
-        if (videoRef.current && event.streams[0]) {
-          videoRef.current.srcObject = event.streams[0];
-        }
-      };
-
-      let connected = false;
-
-      pc.oniceconnectionstatechange = () => {
-        if (cancelledRef.current) return;
-        const state = pc.iceConnectionState;
-
-        if (state === "connected" || state === "completed") {
-          connected = true;
-          if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-          setStatus(usingFallback.current ? "fallback" : "connected");
-        } else if (state === "failed" || state === "disconnected") {
-          if (!usingFallback.current && fallbackSrc) {
-            connected = true;
-            usingFallback.current = true;
-            cleanup();
-            connectTo(fallbackSrc);
-          } else if (!connected) {
-            setStatus("error");
-            setErrorMsg("WebRTC connection lost");
-          }
-        }
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      const sdpResponse = await fetch(info.webrtc_url, {
-        method: "POST",
-        headers: { "Content-Type": "application/sdp" },
-        body: offer.sdp,
-      });
-
-      if (!sdpResponse.ok) {
-        throw new Error(`go2rtc WebRTC handshake failed: ${sdpResponse.status}`);
-      }
-
-      const answerSdp = await sdpResponse.text();
-      if (cancelledRef.current) return;
-
-      await pc.setRemoteDescription(new RTCSessionDescription({
-        type: "answer",
-        sdp: answerSdp,
-      }));
-
-      // Timeout: if not connected within CONNECT_TIMEOUT_MS, fall back
-      timerRef.current = setTimeout(() => {
-        if (cancelledRef.current) return;
-        if (!connected) {
-          if (!usingFallback.current && fallbackSrc) {
-            usingFallback.current = true;
-            cleanup();
-            connectTo(fallbackSrc);
-          } else if (!connected) {
-            setStatus("error");
-            setErrorMsg("Connection timed out");
-          }
-        }
-      }, CONNECT_TIMEOUT_MS);
-
-    } catch (err) {
-      if (cancelledRef.current) return;
-      if (!usingFallback.current && fallbackSrc) {
-        usingFallback.current = true;
-        connectTo(fallbackSrc);
-      } else {
-        setStatus("error");
-        setErrorMsg(err instanceof Error ? err.message : String(err));
-      }
-    }
-  }, [fallbackSrc, cleanup]);
+    setStatus("fallback");
+  }, [cleanup]);
 
   useEffect(() => {
+    let cancelled = false;
     cancelledRef.current = false;
-    usingFallback.current = false;
-    connectTo(src);
+    connectedRef.current = false;
+
+    async function connect() {
+      try {
+        setStatus("loading");
+
+        const res = await fetch(`/api/go2rtc?src=${src}`);
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Failed to get stream info");
+        }
+
+        if (cancelled) return;
+
+        const info: Go2rtcStream = await res.json();
+        setStreamInfo(info);
+
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+        pcRef.current = pc;
+
+        pc.addTransceiver("video", { direction: "recvonly" });
+        pc.addTransceiver("audio", { direction: "recvonly" });
+
+        pc.ontrack = (event) => {
+          if (videoRef.current && event.streams[0]) {
+            videoRef.current.srcObject = event.streams[0];
+          }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          if (cancelled) return;
+          const state = pc.iceConnectionState;
+
+          if (state === "connected" || state === "completed") {
+            connectedRef.current = true;
+            if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+            setStatus("connected");
+          } else if ((state === "failed" || state === "disconnected") && !connectedRef.current) {
+            activateFallback();
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const sdpResponse = await fetch(info.webrtc_url, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: offer.sdp,
+        });
+
+        if (!sdpResponse.ok) {
+          throw new Error(`go2rtc WebRTC handshake failed: ${sdpResponse.status}`);
+        }
+
+        const answerSdp = await sdpResponse.text();
+        if (cancelled) return;
+
+        await pc.setRemoteDescription(new RTCSessionDescription({
+          type: "answer",
+          sdp: answerSdp,
+        }));
+
+        // Timeout: if not connected within CONNECT_TIMEOUT_MS, fall back
+        timerRef.current = setTimeout(() => {
+          if (cancelled) return;
+          if (!connectedRef.current) {
+            activateFallback();
+          }
+        }, CONNECT_TIMEOUT_MS);
+
+      } catch (err) {
+        if (cancelled) return;
+        activateFallback();
+      }
+    }
+
+    connect();
 
     return () => {
+      cancelled = true;
       cancelledRef.current = true;
       cleanup();
     };
-  }, [src, connectTo, cleanup]);
+  }, [src, cleanup, activateFallback]);
 
   function handleReconnect() {
     cancelledRef.current = true;
     cleanup();
-    usingFallback.current = false;
+    connectedRef.current = false;
     setStatus("loading");
     setErrorMsg("");
     setStreamInfo(null);
     cancelledRef.current = false;
-    connectTo(src);
+
+    // Try live stream again
+    async function connect() {
+      try {
+        const res = await fetch(`/api/go2rtc?src=${src}`);
+        if (!res.ok) throw new Error("Stream unavailable");
+
+        const info: Go2rtcStream = await res.json();
+        setStreamInfo(info);
+
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+        pcRef.current = pc;
+
+        pc.addTransceiver("video", { direction: "recvonly" });
+        pc.addTransceiver("audio", { direction: "recvonly" });
+
+        pc.ontrack = (event) => {
+          if (videoRef.current && event.streams[0]) {
+            videoRef.current.srcObject = event.streams[0];
+          }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          const state = pc.iceConnectionState;
+          if (state === "connected" || state === "completed") {
+            connectedRef.current = true;
+            if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+            setStatus("connected");
+          } else if ((state === "failed" || state === "disconnected") && !connectedRef.current) {
+            activateFallback();
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const sdpResponse = await fetch(info.webrtc_url, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: offer.sdp,
+        });
+
+        if (!sdpResponse.ok) throw new Error("WebRTC handshake failed");
+
+        const answerSdp = await sdpResponse.text();
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: answerSdp }));
+
+        timerRef.current = setTimeout(() => {
+          if (!connectedRef.current) activateFallback();
+        }, CONNECT_TIMEOUT_MS);
+
+      } catch {
+        activateFallback();
+      }
+    }
+
+    connect();
   }
+
+  const showVideo = status === "connected" || status === "fallback";
+  const showFallbackVideo = status === "fallback";
 
   return (
     <div className={className} style={{ position: "relative", ...style }}>
+      {/* Live WebRTC video */}
       <video
         ref={videoRef}
         autoPlay
@@ -180,9 +227,28 @@ export default function Go2rtcPlayer({ src = "camera1", fallbackSrc, className, 
           objectFit: "cover",
           borderRadius: 10,
           background: "#1a1a1a",
-          display: status === "error" ? "none" : "block",
+          display: showVideo && !showFallbackVideo ? "block" : "none",
         }}
       />
+
+      {/* Fallback HTML5 video */}
+      {showFallbackVideo && (
+        <video
+          ref={fallbackVideoRef}
+          autoPlay
+          muted
+          loop
+          playsInline
+          src="/fallback.mp4"
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            borderRadius: 10,
+            background: "#1a1a1a",
+          }}
+        />
+      )}
 
       {status === "loading" && (
         <div style={{
