@@ -19,15 +19,33 @@ type Props = {
   style?: React.CSSProperties;
 };
 
+const CONNECT_TIMEOUT_MS = 8000;
+
 export default function Go2rtcPlayer({ src = "camera1", fallbackSrc, className, style }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"loading" | "connected" | "fallback" | "error">("loading");
   const [streamInfo, setStreamInfo] = useState<Go2rtcStream | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usingFallback = useRef(false);
+  const cancelledRef = useRef(false);
+
+  const cleanup = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+  }, []);
 
   const connectTo = useCallback(async (streamSrc: string) => {
+    cleanup();
+    cancelledRef.current = false;
+
     try {
       setStatus("loading");
 
@@ -36,6 +54,8 @@ export default function Go2rtcPlayer({ src = "camera1", fallbackSrc, className, 
         const err = await res.json();
         throw new Error(err.error || "Failed to get stream info");
       }
+
+      if (cancelledRef.current) return;
 
       const info: Go2rtcStream = await res.json();
       setStreamInfo(info);
@@ -54,17 +74,23 @@ export default function Go2rtcPlayer({ src = "camera1", fallbackSrc, className, 
         }
       };
 
+      let connected = false;
+
       pc.oniceconnectionstatechange = () => {
+        if (cancelledRef.current) return;
         const state = pc.iceConnectionState;
+
         if (state === "connected" || state === "completed") {
+          connected = true;
+          if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
           setStatus(usingFallback.current ? "fallback" : "connected");
         } else if (state === "failed" || state === "disconnected") {
           if (!usingFallback.current && fallbackSrc) {
+            connected = true;
             usingFallback.current = true;
-            pc.close();
-            pcRef.current = null;
+            cleanup();
             connectTo(fallbackSrc);
-          } else {
+          } else if (!connected) {
             setStatus("error");
             setErrorMsg("WebRTC connection lost");
           }
@@ -85,12 +111,30 @@ export default function Go2rtcPlayer({ src = "camera1", fallbackSrc, className, 
       }
 
       const answerSdp = await sdpResponse.text();
+      if (cancelledRef.current) return;
+
       await pc.setRemoteDescription(new RTCSessionDescription({
         type: "answer",
         sdp: answerSdp,
       }));
 
+      // Timeout: if not connected within CONNECT_TIMEOUT_MS, fall back
+      timerRef.current = setTimeout(() => {
+        if (cancelledRef.current) return;
+        if (!connected) {
+          if (!usingFallback.current && fallbackSrc) {
+            usingFallback.current = true;
+            cleanup();
+            connectTo(fallbackSrc);
+          } else if (!connected) {
+            setStatus("error");
+            setErrorMsg("Connection timed out");
+          }
+        }
+      }, CONNECT_TIMEOUT_MS);
+
     } catch (err) {
+      if (cancelledRef.current) return;
       if (!usingFallback.current && fallbackSrc) {
         usingFallback.current = true;
         connectTo(fallbackSrc);
@@ -99,32 +143,27 @@ export default function Go2rtcPlayer({ src = "camera1", fallbackSrc, className, 
         setErrorMsg(err instanceof Error ? err.message : String(err));
       }
     }
-  }, [fallbackSrc]);
+  }, [fallbackSrc, cleanup]);
 
   useEffect(() => {
-    let cancelled = false;
-
+    cancelledRef.current = false;
     usingFallback.current = false;
-    connectTo(src).catch(() => {});
+    connectTo(src);
 
     return () => {
-      cancelled = true;
-      if (pcRef.current) {
-        pcRef.current.close();
-        pcRef.current = null;
-      }
+      cancelledRef.current = true;
+      cleanup();
     };
-  }, [src, connectTo]);
+  }, [src, connectTo, cleanup]);
 
   function handleReconnect() {
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
+    cancelledRef.current = true;
+    cleanup();
     usingFallback.current = false;
     setStatus("loading");
     setErrorMsg("");
     setStreamInfo(null);
+    cancelledRef.current = false;
     connectTo(src);
   }
 
