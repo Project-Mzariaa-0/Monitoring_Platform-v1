@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import ModelConfig, load_config
 from temporal.lstm_model import MilkingActionLSTM
-from temporal.sequence_dataset import create_dataloaders f
+from temporal.preextracted_dataset import create_dataloaders
 
 
 class Trainer:

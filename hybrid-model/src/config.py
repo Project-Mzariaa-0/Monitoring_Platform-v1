@@ -97,6 +97,20 @@ class InferenceConfig:
 
 
 @dataclass
+class StationConfig:
+    """Station location configuration."""
+    dip_station: List[float] = field(default_factory=lambda: [0.1, 0.7, 0.2, 0.3])
+
+
+@dataclass
+class DomainConfig:
+    """Domain-specific configuration."""
+    stations: StationConfig = field(default_factory=StationConfig)
+    max_persons: int = 2
+    camera_resolution: List[int] = field(default_factory=lambda: [1248, 576])
+
+
+@dataclass
 class ModelConfig:
     """Main model configuration."""
     yolo: YOLOConfig = field(default_factory=YOLOConfig)
@@ -104,6 +118,7 @@ class ModelConfig:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     data: DataConfig = field(default_factory=DataConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
+    domain: DomainConfig = field(default_factory=DomainConfig)
     
     # Paths
     models_dir: str = "models"

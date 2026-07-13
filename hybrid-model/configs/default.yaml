@@ -5,19 +5,56 @@ model:
   # YOLO settings
   yolo:
     model: "yolov8n.pt"
-    confidence: 0.3
+    confidence: 0.25
     device: "auto"  # auto, cpu, cuda:0
     input_size: 640
   
   # LSTM settings
   lstm:
-    input_size: 256  # YOLO feature dimension
+    input_size: 512  # Expanded for multi-person + spatial features
     hidden_size: 256
     num_layers: 2
     bidirectional: true
     dropout: 0.3
     sequence_length: 30  # frames (6 seconds at 5 FPS)
     num_classes: 6  # milking tasks
+
+# Domain-specific configuration
+domain:
+  # Camera layout
+  camera:
+    resolution: [1248, 576]
+    fps: 12.8
+  
+  # Known locations (normalized coordinates)
+  stations:
+    dip_station: [0.1, 0.7, 0.2, 0.3]  # bottom-left corner
+  
+  # Person tracking
+  max_persons: 2
+  
+  # Task-specific cues
+  task_cues:
+    TASK-01:
+      name: "Pre-cleaning"
+      signals: ["person", "arm_raised", "pipe", "water_spray"]
+      description: "Person lifts pipe and shoots water"
+    TASK-02:
+      name: "Stripping"
+      signals: ["person", "hand_on_udder"]
+    TASK-03:
+      name: "Machine attachment"
+      signals: ["person", "cups_moving_to_udder"]
+    TASK-04:
+      name: "Milking"
+      signals: ["cups_attached", "no_person_moving"]
+    TASK-05:
+      name: "Detachment"
+      signals: ["cups_detaching"]
+    TASK-06:
+      name: "Post-dip"
+      signals: ["person", "cup_filled", "cup_at_udder"]
+      description: "Person fills cup at station, then applies dip"
 
 # Training configuration
 training:
