@@ -479,7 +479,10 @@ export async function getMonitoringOverview(): Promise<{
     .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
     .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
 
-  const totalSessionRows = await db.select().from(sessions);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const totalSessionRows = await db.select().from(sessions).where(sql`${sessions.created_at} >= ${todayStart}`);
   const totalSessions = totalSessionRows.length;
   const activeCount = totalSessionRows.filter((s) => s.status === "active").length;
 
