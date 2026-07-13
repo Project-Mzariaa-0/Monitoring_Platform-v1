@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 type Go2rtcStream = {
   name: string;
@@ -14,88 +14,98 @@ type Go2rtcStream = {
 
 type Props = {
   src?: string;
+  fallbackSrc?: string;
   className?: string;
   style?: React.CSSProperties;
 };
 
-export default function Go2rtcPlayer({ src = "camera1", className, style }: Props) {
+export default function Go2rtcPlayer({ src = "camera1", fallbackSrc, className, style }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [status, setStatus] = useState<"loading" | "connected" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "connected" | "fallback" | "error">("loading");
   const [streamInfo, setStreamInfo] = useState<Go2rtcStream | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const usingFallback = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const connectTo = useCallback(async (streamSrc: string) => {
+    try {
+      setStatus("loading");
 
-    async function connect() {
-      try {
-        setStatus("loading");
+      const res = await fetch(`/api/go2rtc?src=${streamSrc}`);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to get stream info");
+      }
 
-        const res = await fetch(`/api/go2rtc?src=${src}`);
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Failed to get stream info");
+      const info: Go2rtcStream = await res.json();
+      setStreamInfo(info);
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+      pcRef.current = pc;
+
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+
+      pc.ontrack = (event) => {
+        if (videoRef.current && event.streams[0]) {
+          videoRef.current.srcObject = event.streams[0];
         }
+      };
 
-        const info: Go2rtcStream = await res.json();
-        if (cancelled) return;
-        setStreamInfo(info);
-
-        const pc = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        });
-        pcRef.current = pc;
-
-        pc.addTransceiver("video", { direction: "recvonly" });
-        pc.addTransceiver("audio", { direction: "recvonly" });
-
-        pc.ontrack = (event) => {
-          if (videoRef.current && event.streams[0]) {
-            videoRef.current.srcObject = event.streams[0];
-          }
-        };
-
-        pc.oniceconnectionstatechange = () => {
-          if (cancelled) return;
-          const state = pc.iceConnectionState;
-          if (state === "connected" || state === "completed") {
-            setStatus("connected");
-          } else if (state === "failed" || state === "disconnected") {
+      pc.oniceconnectionstatechange = () => {
+        const state = pc.iceConnectionState;
+        if (state === "connected" || state === "completed") {
+          setStatus(usingFallback.current ? "fallback" : "connected");
+        } else if (state === "failed" || state === "disconnected") {
+          if (!usingFallback.current && fallbackSrc) {
+            usingFallback.current = true;
+            pc.close();
+            pcRef.current = null;
+            connectTo(fallbackSrc);
+          } else {
             setStatus("error");
             setErrorMsg("WebRTC connection lost");
           }
-        };
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        const sdpResponse = await fetch(info.webrtc_url, {
-          method: "POST",
-          headers: { "Content-Type": "application/sdp" },
-          body: offer.sdp,
-        });
-
-        if (!sdpResponse.ok) {
-          throw new Error(`go2rtc WebRTC handshake failed: ${sdpResponse.status}`);
         }
+      };
 
-        const answerSdp = await sdpResponse.text();
-        if (cancelled) return;
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-        await pc.setRemoteDescription(new RTCSessionDescription({
-          type: "answer",
-          sdp: answerSdp,
-        }));
+      const sdpResponse = await fetch(info.webrtc_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: offer.sdp,
+      });
 
-      } catch (err) {
-        if (cancelled) return;
+      if (!sdpResponse.ok) {
+        throw new Error(`go2rtc WebRTC handshake failed: ${sdpResponse.status}`);
+      }
+
+      const answerSdp = await sdpResponse.text();
+      await pc.setRemoteDescription(new RTCSessionDescription({
+        type: "answer",
+        sdp: answerSdp,
+      }));
+
+    } catch (err) {
+      if (!usingFallback.current && fallbackSrc) {
+        usingFallback.current = true;
+        connectTo(fallbackSrc);
+      } else {
         setStatus("error");
         setErrorMsg(err instanceof Error ? err.message : String(err));
       }
     }
+  }, [fallbackSrc]);
 
-    connect();
+  useEffect(() => {
+    let cancelled = false;
+
+    usingFallback.current = false;
+    connectTo(src).catch(() => {});
 
     return () => {
       cancelled = true;
@@ -104,16 +114,18 @@ export default function Go2rtcPlayer({ src = "camera1", className, style }: Prop
         pcRef.current = null;
       }
     };
-  }, [src]);
+  }, [src, connectTo]);
 
   function handleReconnect() {
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
+    usingFallback.current = false;
     setStatus("loading");
     setErrorMsg("");
     setStreamInfo(null);
+    connectTo(src);
   }
 
   return (
@@ -174,6 +186,33 @@ export default function Go2rtcPlayer({ src = "camera1", className, style }: Prop
             animation: "breathe 2.4s ease-in-out infinite",
           }} />
           LIVE
+        </div>
+      )}
+
+      {status === "fallback" && (
+        <div style={{
+          position: "absolute",
+          top: 10,
+          left: 10,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "4px 10px",
+          borderRadius: 999,
+          background: "rgba(0,0,0,0.55)",
+          backdropFilter: "blur(8px)",
+          color: "#fff",
+          fontSize: 11,
+          fontWeight: 600,
+        }}>
+          <span style={{
+            width: 6,
+            height: 6,
+            borderRadius: 999,
+            background: "#facc15",
+            animation: "breathe 2.4s ease-in-out infinite",
+          }} />
+          FALLBACK
         </div>
       )}
 

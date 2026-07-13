@@ -56,6 +56,7 @@ export default async function LivePage() {
                 </div>
                 <Go2rtcPlayer
                   src={`camera${position}`}
+                  fallbackSrc={`fallback${position}`}
                   style={{ height: 220, borderRadius: 10 }}
                 />
                 <div style={{ marginTop: 14 }}>

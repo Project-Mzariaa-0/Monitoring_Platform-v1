@@ -6,9 +6,9 @@ api:
 streams:
   camera1: rtsp://admin:winservice@45.218.147.209:554/Streaming/Channels/101
   camera2: rtsp://admin:winservice@45.218.147.209:554/Streaming/Channels/102
-  # Test streams (uncomment for development without a real camera):
-  # test1: "ffmpeg:testsrc -re -f lavfi -i testsrc=size=640x480:rate=25 -f rtsp {output}"
-  # test2: "ffmpeg:testsrc2 -re -f lavfi -i testsrc2=size=640x480:rate=25 -f rtsp {output}"
+  # Fallback streams (loop local video when live camera is unreachable)
+  fallback1: "ffmpeg:full_clip.mp4 -re -stream_loop -1 -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f rtsp {output}"
+  fallback2: "ffmpeg:full_clip.mp4 -re -stream_loop -1 -f lavfi -i anullsrc=r=44100:cl=stereo -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f rtsp {output}"
 
 webrtc:
   listen: ":8555"

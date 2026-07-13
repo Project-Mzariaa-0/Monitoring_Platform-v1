@@ -81,6 +81,7 @@ export default async function DashboardPage() {
                 </div>
                 <Go2rtcPlayer
                   src={`camera${position}`}
+                  fallbackSrc={`fallback${position}`}
                   style={{ height: 180, borderRadius: 10 }}
                 />
                 <div style={{ marginTop: 14 }}>
