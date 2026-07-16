@@ -7,8 +7,8 @@ streams:
   camera1: rtsp://admin:winservice@45.218.147.209:554/Streaming/Channels/101
   camera2: rtsp://admin:winservice@45.218.147.209:554/Streaming/Channels/102
   # Fallback streams (loop local video when live camera is unreachable)
-  fallback1: "ffmpeg:/config/full_clip.mp4 -c:v libx264 -preset ultrafast -tune zerolatency -an -f rtsp rtsp://127.0.0.1:554/fallback1"
-  fallback2: "ffmpeg:/config/full_clip.mp4 -c:v libx264 -preset ultrafast -tune zerolatency -an -f rtsp rtsp://127.0.0.1:554/fallback2"
+  fallback1: "ffmpeg:/config/full_clip.mov -c:v libvpx -deadline realtime -cpu-used 4 -an -f webm pipe:1"
+  fallback2: "ffmpeg:/config/full_clip.mov -c:v libvpx -deadline realtime -cpu-used 4 -an -f webm pipe:1"
 
 webrtc:
   listen: ":8555"

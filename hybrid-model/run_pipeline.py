@@ -31,7 +31,7 @@ TASK_MAP = {
     "task_06_postdip": {"id": "TASK-06", "label": 5, "name": "Post-dip"},
 }
 
-SEQUENCE_LENGTH = 30  # frames per training sequence
+SEQUENCE_LENGTH = 30  # default, overridden by --seq-length
 
 
 def step1_extract_frames(raw_dir: str, output_dir: str, target_fps: int = 5):
@@ -106,10 +106,15 @@ def step1_extract_frames(raw_dir: str, output_dir: str, target_fps: int = 5):
     return total_frames
 
 
-def step2_extract_features(config: ModelConfig, frames_dir: str, features_dir: str):
-    """Extract enhanced features from all frames."""
+def step2_extract_features(config: ModelConfig, frames_dir: str, features_dir: str, seq_len: int = 30):
+    """Extract motion-aware sequence features from all frames.
+
+    Processes frames in chunks of `seq_len` and computes motion features
+    (optical flow, person displacement, temporal stats) between consecutive frames.
+    Each clip produces one (seq_len, 512) sequence.
+    """
     logger.info("=" * 60)
-    logger.info("STEP 2: Extracting enhanced features (512-dim)")
+    logger.info("STEP 2: Extracting motion-aware sequence features (512-dim)")
     logger.info("=" * 60)
 
     detector = EnhancedYOLODetector(config)
@@ -135,55 +140,75 @@ def step2_extract_features(config: ModelConfig, frames_dir: str, features_dir: s
         if not frame_files:
             continue
 
-        features_list = []
-        frame_metadata = []
-
-        for i, frame_file in enumerate(tqdm(frame_files, desc=f"  {task_info['name']}")):
+        # Load all frames for this task
+        frames = []
+        for frame_file in tqdm(frame_files, desc=f"  Loading {task_info['name']}"):
             frame = cv2.imread(str(frame_file))
-            if frame is None:
-                continue
+            if frame is not None:
+                frame_resized = cv2.resize(frame, (640, 640))
+                frames.append(frame_resized)
 
-            frame_resized = cv2.resize(frame, (640, 640))
-            frame_features = detector.extract_features(frame_resized, frame_idx=i)
-            features_list.append(frame_features.feature_vector)
+        if not frames:
+            continue
 
-            frame_metadata.append({
-                "frame_file": frame_file.name,
+        # Process in chunks of seq_len
+        sequences = []
+        metadata = []
+        for chunk_start in range(0, len(frames), seq_len):
+            chunk = frames[chunk_start : chunk_start + seq_len]
+            if len(chunk) < 2:
+                continue  # need at least 2 frames for motion
+
+            seq_features = detector.extract_sequence_features(chunk)  # (chunk_len, 512)
+
+            # Pad shorter sequences to seq_len
+            if len(seq_features) < seq_len:
+                pad = np.zeros((seq_len - len(seq_features), 512))
+                seq_features = np.concatenate([seq_features, pad], axis=0)
+
+            sequences.append(seq_features)
+
+            metadata.append({
                 "task_id": task_info["id"],
                 "task_label": task_info["label"],
-                "frame_idx": i,
-                "num_persons": frame_features.num_persons,
-                "arm_raised": frame_features.arm_raised_detected,
-                "near_station": frame_features.persons_near_station > 0,
+                "chunk_start": chunk_start,
+                "chunk_end": chunk_start + len(chunk),
+                "num_frames": len(chunk),
+                "feature_shape": list(seq_features.shape),
             })
 
-        if features_list:
-            features_array = np.array(features_list)
+        if sequences:
+            features_array = np.array(sequences)  # (num_seqs, seq_len, 512)
             task_features_file = features_path / f"{task_name}_features.npy"
             np.save(str(task_features_file), features_array)
 
             metadata_file = features_path / f"{task_name}_metadata.json"
             with open(metadata_file, 'w') as f:
-                json.dump(frame_metadata, f, indent=2)
+                json.dump(metadata, f, indent=2)
 
             all_features[task_name] = {
-                "num_frames": len(features_array),
-                "feature_dim": features_array.shape[1] if len(features_array.shape) > 1 else 0,
-                "metadata_file": str(metadata_file),
+                "num_sequences": len(sequences),
+                "seq_len": seq_len,
+                "feature_dim": features_array.shape[2],
+                "total_frames": sum(m["num_frames"] for m in metadata),
             }
-            total_frames += len(features_array)
-            logger.info(f"  Saved {len(features_array)} frames, shape: {features_array.shape}")
+            total_frames += sum(m["num_frames"] for m in metadata)
+            logger.info(f"  {len(sequences)} sequences, shape: {features_array.shape}")
 
     summary_file = features_path / "extraction_summary.json"
     with open(summary_file, 'w') as f:
         json.dump(all_features, f, indent=2)
 
-    logger.info(f"\nTotal: {total_frames} frames feature-extracted")
+    logger.info(f"\nTotal: {total_frames} frames in {sum(v['num_sequences'] for v in all_features.values())} sequences")
     return all_features
 
 
 def step3_create_annotations(features_dir: str, processed_dir: str):
-    """Create training sequences from extracted features."""
+    """Create training sequences from extracted features.
+
+    Features are already stored as (num_seqs, seq_len, 512) sequences.
+    This step just combines all tasks and creates labels.
+    """
     logger.info("=" * 60)
     logger.info("STEP 3: Creating annotations and training sequences")
     logger.info("=" * 60)
@@ -192,59 +217,45 @@ def step3_create_annotations(features_dir: str, processed_dir: str):
     processed_path = Path(processed_dir)
     processed_path.mkdir(parents=True, exist_ok=True)
 
-    sequences = []
     all_features_combined = []
+    all_labels = []
+    sequences = []
 
     for task_dir_name in sorted(TASK_MAP.keys()):
         task_info = TASK_MAP[task_dir_name]
         features_file = features_path / f"{task_dir_name}_features.npy"
-        metadata_file = features_path / f"{task_dir_name}_metadata.json"
 
         if not features_file.exists():
             logger.warning(f"Features not found for {task_dir_name}, skipping")
             continue
 
-        features = np.load(str(features_file))
-        num_frames = len(features)
+        features = np.load(str(features_file))  # (num_seqs, seq_len, 512)
+        num_seqs = len(features)
 
-        logger.info(f"{task_info['name']}: {num_frames} frames")
+        logger.info(f"{task_info['name']}: {num_seqs} sequences, shape {features.shape}")
 
-        # Create overlapping sequences
-        for seq_start in range(0, max(1, num_frames - SEQUENCE_LENGTH + 1), max(1, SEQUENCE_LENGTH // 2)):
-            seq_end = min(seq_start + SEQUENCE_LENGTH, num_frames)
-            sequence = features[seq_start:seq_end]
-
-            # Pad if needed
-            if len(sequence) < SEQUENCE_LENGTH:
-                padding = np.zeros((SEQUENCE_LENGTH - len(sequence), features.shape[1]))
-                sequence = np.concatenate([sequence, padding], axis=0)
-
+        for i in range(num_seqs):
+            all_features_combined.append(features[i])
+            all_labels.append(task_info["label"])
             sequences.append({
                 "task_dir": task_dir_name,
                 "task_id": task_info["id"],
                 "task_label": task_info["label"],
                 "task_name": task_info["name"],
-                "start_frame": seq_start,
-                "end_frame": seq_end,
-                "sequence_length": len(sequence),
+                "sequence_idx": i,
             })
-
-            all_features_combined.append(sequence)
 
     # Save all sequences
     if all_features_combined:
         all_features_array = np.array(all_features_combined)
-        all_labels = np.array([s["task_label"] for s in sequences])
+        all_labels_array = np.array(all_labels)
 
-        # Save combined features and labels
         np.save(str(processed_path / "all_sequences.npy"), all_features_array)
-        np.save(str(processed_path / "all_labels.npy"), all_labels)
+        np.save(str(processed_path / "all_labels.npy"), all_labels_array)
 
-        # Save sequence metadata
         with open(processed_path / "sequences.json", 'w') as f:
             json.dump(sequences, f, indent=2)
 
-        # Count per task
         task_counts = {}
         for s in sequences:
             task_id = s["task_id"]
@@ -338,9 +349,16 @@ def step5_train_model(config: ModelConfig, processed_dir: str, splits_dir: str):
     with open(splits_path / "val.txt", 'r') as f:
         val_indices = [int(line.strip()) for line in f if line.strip()]
 
-    logger.info(f"Train sequences: {len(train_indices)}")
+    # Augment training data
+    from training.augmentation import augment_dataset
+    train_features = all_features[train_indices]
+    train_labels = all_labels[train_indices]
+    aug_features, aug_labels = augment_dataset(train_features, train_labels, n_augmented=8, seed=42)
+    logger.info(f"Original train: {len(train_indices)} -> Augmented: {len(aug_labels)}")
+
+    logger.info(f"Train sequences: {len(aug_labels)}")
     logger.info(f"Val sequences: {len(val_indices)}")
-    logger.info(f"Feature shape: {all_features.shape}")
+    logger.info(f"Feature shape: {aug_features.shape}")
     logger.info(f"Num classes: {len(np.unique(all_labels))}")
 
     # Custom dataset
@@ -355,7 +373,7 @@ def step5_train_model(config: ModelConfig, processed_dir: str, splits_dir: str):
         def __getitem__(self, idx):
             return self.features[idx], self.labels[idx]
 
-    train_dataset = SequenceDataset(all_features[train_indices], all_labels[train_indices])
+    train_dataset = SequenceDataset(aug_features, aug_labels)
     val_dataset = SequenceDataset(all_features[val_indices], all_labels[val_indices])
 
     batch_size = min(config.training.batch_size, len(train_dataset))
@@ -378,8 +396,18 @@ def step5_train_model(config: ModelConfig, processed_dir: str, splits_dir: str):
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Model parameters: {total_params:,}")
 
-    # Loss, optimizer, scheduler
-    criterion = nn.CrossEntropyLoss()
+    # Loss, optimizer, scheduler — weighted to handle class imbalance
+    unique_labels = np.unique(aug_labels).astype(int)
+    class_counts = np.bincount(aug_labels.astype(int))
+    # Compute weights only for classes that exist, map back to full range
+    class_weights = np.ones(config.lstm.num_classes, dtype=np.float64)
+    for lbl in unique_labels:
+        if lbl < config.lstm.num_classes:
+            class_weights[lbl] = len(aug_labels) / (class_counts[lbl] * config.lstm.num_classes)
+    class_weights = np.clip(class_weights, 0.1, 10.0)
+    class_weights_tensor = torch.FloatTensor(class_weights).to(device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    logger.info(f"Class weights: {dict(zip(range(config.lstm.num_classes), [f'{w:.3f}' for w in class_weights]))}")
     optimizer = optim.Adam(model.parameters(), lr=config.training.learning_rate, weight_decay=config.training.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.training.epochs)
 
@@ -506,6 +534,7 @@ def main():
     parser.add_argument("--processed-dir", type=str, default="data/processed_v2")
     parser.add_argument("--splits-dir", type=str, default="data/splits_v2")
     parser.add_argument("--fps", type=int, default=5)
+    parser.add_argument("--seq-length", type=int, default=30, help="Sequence length for motion features")
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--skip-frames", action="store_true", help="Skip frame extraction")
     parser.add_argument("--skip-features", action="store_true", help="Skip feature extraction")
@@ -533,7 +562,8 @@ def main():
         step2_extract_features(
             config,
             str(base_dir / args.frames_dir),
-            str(base_dir / args.features_dir)
+            str(base_dir / args.features_dir),
+            seq_len=args.seq_length,
         )
     else:
         logger.info("Skipping feature extraction")

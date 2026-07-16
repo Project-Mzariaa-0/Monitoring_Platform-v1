@@ -26,6 +26,7 @@ services:
       - "8555:8555/udp"
     volumes:
       - ./apps/go2rtc/go2rtc.yaml:/config/go2rtc.yaml
+      - ../../hybrid-model/data/raw/full_clip.mov:/config/full_clip.mov
     environment:
       - TZ=UTC
 

@@ -5,19 +5,19 @@ model:
   # YOLO settings
   yolo:
     model: "yolov8n.pt"
-    confidence: 0.25
+    confidence: 0.05
     device: "auto"  # auto, cpu, cuda:0
     input_size: 640
   
   # LSTM settings
   lstm:
-    input_size: 512  # Expanded for multi-person + spatial features
-    hidden_size: 256
-    num_layers: 2
-    bidirectional: true
-    dropout: 0.3
-    sequence_length: 30  # frames (6 seconds at 5 FPS)
-    num_classes: 6  # milking tasks
+    input_size: 512
+    hidden_size: 64
+    num_layers: 1
+    bidirectional: false
+    dropout: 0.7
+    sequence_length: 30
+    num_classes: 6
 
 # Domain-specific configuration
 domain:

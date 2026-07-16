@@ -13,7 +13,7 @@ import yaml
 class YOLOConfig:
     """YOLO detector configuration."""
     model: str = "yolov8n.pt"
-    confidence: float = 0.3
+    confidence: float = 0.05
     device: str = "auto"
     input_size: int = 640
     
@@ -25,11 +25,11 @@ class YOLOConfig:
 @dataclass
 class LSTMConfig:
     """LSTM model configuration."""
-    input_size: int = 256  # YOLO feature dimension
-    hidden_size: int = 256
-    num_layers: int = 2
-    bidirectional: bool = True
-    dropout: float = 0.3
+    input_size: int = 512  # YOLO feature dimension
+    hidden_size: int = 64
+    num_layers: int = 1
+    bidirectional: bool = False
+    dropout: float = 0.7
     sequence_length: int = 30  # frames (6 seconds at 5 FPS)
     num_classes: int = 6  # milking tasks
     
