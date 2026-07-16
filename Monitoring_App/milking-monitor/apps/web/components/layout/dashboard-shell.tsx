@@ -7,6 +7,7 @@ import { useSession, signOut } from "next-auth/react";
 const navItems = [
   { href: "/", label: "Overview" },
   { href: "/live", label: "Live View" },
+  { href: "/sessions", label: "Sessions" },
   { href: "/logs", label: "Audit Log" },
   { href: "/equipment", label: "Equipment" },
   { href: "/analytics", label: "Analytics" },
@@ -17,6 +18,7 @@ const navItems = [
 function pageTitle(pathname: string) {
   if (pathname === "/") return "Supervisor Overview";
   if (pathname.startsWith("/live")) return "Live View";
+  if (pathname === "/sessions") return "Session History";
   if (pathname.startsWith("/logs")) return "Unit Logs";
   if (pathname.startsWith("/equipment")) return "Equipment";
   if (pathname.startsWith("/analytics")) return "Analytics";
