@@ -97,6 +97,38 @@ export async function listSessions(): Promise<SessionRecord[]> {
   }));
 }
 
+export async function listActiveSessions(): Promise<SessionRecord[]> {
+  const now = new Date().toISOString();
+
+  await db
+    .update(sessions)
+    .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
+    .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+
+  const rows = await db
+    .select()
+    .from(sessions)
+    .where(inArray(sessions.status, ["scheduled", "active"]))
+    .orderBy(desc(sessions.scheduled_start_time));
+
+  return rows.map((r) => ({
+    id: r.id,
+    supervisor_id: r.supervisor_id,
+    employee_id: r.employee_id,
+    employee_name: r.employee_name,
+    supervisor_name: r.supervisor_name,
+    supervisor_email: r.supervisor_email,
+    scheduled_start_time: toISO(r.scheduled_start_time) ?? "",
+    estimated_end_time: toISO(r.estimated_end_time) ?? "",
+    actual_end_time: toISO(r.actual_end_time),
+    row_1_cow_count: Number(r.row_1_cow_count),
+    row_2_cow_count: Number(r.row_2_cow_count),
+    status: r.status as SessionStatus,
+    created_at: toISO(r.created_at) ?? "",
+    updated_at: toISO(r.updated_at) ?? "",
+  }));
+}
+
 export async function getSession(sessionId: string): Promise<SessionRecord | null> {
   const now = new Date().toISOString();
 
@@ -312,6 +344,36 @@ export async function updateSessionEmployee(
   };
 }
 
+export async function updateSessionStatus(
+  sessionId: string,
+  status: string,
+): Promise<SessionRecord | null> {
+  const [updated] = await db
+    .update(sessions)
+    .set({ status, updated_at: new Date() })
+    .where(eq(sessions.id, sessionId))
+    .returning();
+
+  if (!updated) return null;
+
+  return {
+    id: updated.id,
+    supervisor_id: updated.supervisor_id,
+    employee_id: updated.employee_id,
+    employee_name: updated.employee_name,
+    supervisor_name: updated.supervisor_name,
+    supervisor_email: updated.supervisor_email,
+    scheduled_start_time: toISO(updated.scheduled_start_time) ?? "",
+    estimated_end_time: toISO(updated.estimated_end_time) ?? "",
+    actual_end_time: toISO(updated.actual_end_time),
+    row_1_cow_count: Number(updated.row_1_cow_count),
+    row_2_cow_count: Number(updated.row_2_cow_count),
+    status: updated.status as SessionStatus,
+    created_at: toISO(updated.created_at) ?? "",
+    updated_at: toISO(updated.updated_at) ?? "",
+  };
+}
+
 export async function ingestTaskEvent(input: {
   session_id: string;
   cow_position: 1 | 2;
@@ -484,10 +546,10 @@ export async function getMonitoringOverview(): Promise<{
 
   const totalSessionRows = await db.select().from(sessions).where(sql`${sessions.created_at} >= ${todayStart}`);
   const totalSessions = totalSessionRows.length;
-  const activeCount = totalSessionRows.filter((s) => s.status === "active").length;
+  const activeCount = totalSessionRows.filter((s) => s.status === "active" || s.status === "scheduled").length;
 
   const activeSessionRow =
-    (await db.select().from(sessions).where(eq(sessions.status, "active")).orderBy(desc(sessions.updated_at)).limit(1)).at(0) ?? null;
+    (await db.select().from(sessions).where(inArray(sessions.status, ["active", "scheduled"])).orderBy(desc(sessions.updated_at)).limit(1)).at(0) ?? null;
 
   const activeSession: SessionRecord | null = activeSessionRow
     ? {

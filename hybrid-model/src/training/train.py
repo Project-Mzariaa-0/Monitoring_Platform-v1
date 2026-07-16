@@ -125,7 +125,7 @@ class Trainer:
         avg_loss = total_loss / len(train_loader)
         accuracy = 100. * correct / total
         
-        return avg_loss, accuracy
+        return avg_loss, accuracy  
     
     def validate(self, val_loader: DataLoader) -> Tuple[float, float]:
         """
