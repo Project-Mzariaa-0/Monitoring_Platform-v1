@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
-import { createReport, getSessionDetails } from "../../../../lib/data/store";
+import { createReport, getSessionDetails, getEmployeeAnalytics, getTaskAnalytics } from "../../../../lib/data/store";
 import { generateReportSchema } from "../../../../lib/validation/report";
 import { generateDocxReport } from "../../../../lib/reporting/docx-generator";
 
@@ -23,8 +23,21 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "Session not found" }, { status: 404 });
   }
 
+  // Fetch employee analytics for this session's employee
+  const employeeAnalyticsList = await getEmployeeAnalytics();
+  const employeeAnalytics = employeeAnalyticsList.find(
+    (e) => e.employee_name === details.session.employee_name,
+  ) ?? null;
+
+  // Fetch task analytics
+  const taskAnalytics = await getTaskAnalytics();
+
   try {
-    const docxBuffer = await generateDocxReport(details);
+    const docxBuffer = await generateDocxReport({
+      ...details,
+      employeeAnalytics: employeeAnalytics ?? undefined,
+      taskAnalytics,
+    });
 
     const reportsDir = join(process.cwd(), "public", "reports");
     await mkdir(reportsDir, { recursive: true });

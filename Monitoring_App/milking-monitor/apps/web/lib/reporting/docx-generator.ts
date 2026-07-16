@@ -39,7 +39,32 @@ interface ReportData {
     status: string;
     override_status?: string;
   }>;
+  employeeAnalytics?: {
+    compliance: number;
+    total_sessions: number;
+    completed_tasks: number;
+    missed_tasks: number;
+    avg_duration_seconds: number;
+    status: string;
+  };
+  taskAnalytics?: Array<{
+    task_id: string;
+    label: string;
+    total: number;
+    completed: number;
+    missed: number;
+    avg_duration_seconds: number;
+  }>;
 }
+
+const TASK_LABELS: Record<string, string> = {
+  "TASK-01": "Pre-cleaning",
+  "TASK-02": "Stripping",
+  "TASK-03": "Machine Attachment",
+  "TASK-04": "Milking",
+  "TASK-05": "Detachment",
+  "TASK-06": "Post-dip",
+};
 
 function formatDate(dateString: string | null): string {
   if (!dateString) return "N/A";
@@ -53,7 +78,7 @@ function statusToDisplay(status: string): string {
 }
 
 export async function generateDocxReport(data: ReportData): Promise<Uint8Array> {
-  const { session, cowProcesses, taskEvents } = data;
+  const { session, cowProcesses, taskEvents, employeeAnalytics, taskAnalytics } = data;
 
   const children: (Paragraph | Table)[] = [];
 
@@ -95,12 +120,83 @@ export async function generateDocxReport(data: ReportData): Promise<Uint8Array> 
     );
   }
 
+  // Employee Performance
+  if (employeeAnalytics) {
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: "Employee Performance", bold: true, size: 24 })],
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 240 },
+      }),
+    );
+
+    const empDetails = [
+      `Compliance Score: ${employeeAnalytics.compliance}%`,
+      `Total Sessions: ${employeeAnalytics.total_sessions}`,
+      `Completed Tasks: ${employeeAnalytics.completed_tasks}`,
+      `Missed Tasks: ${employeeAnalytics.missed_tasks}`,
+      `Average Task Duration: ${employeeAnalytics.avg_duration_seconds > 0 ? `${Math.floor(employeeAnalytics.avg_duration_seconds / 60)}m ${employeeAnalytics.avg_duration_seconds % 60}s` : "N/A"}`,
+      `Performance Status: ${employeeAnalytics.status}`,
+    ];
+
+    for (const detail of empDetails) {
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: detail, size: 20 })],
+          spacing: { after: 60 },
+        }),
+      );
+    }
+  }
+
+  // Task Breakdown
+  if (taskAnalytics && taskAnalytics.length > 0) {
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: "Task Breakdown", bold: true, size: 24 })],
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 240 },
+      }),
+    );
+
+    const headerRow = new TableRow({
+      children: [
+        new TableCell({ children: [new Paragraph("Task")], width: { size: 2000, type: WidthType.DXA } }),
+        new TableCell({ children: [new Paragraph("Completed")], width: { size: 1500, type: WidthType.DXA } }),
+        new TableCell({ children: [new Paragraph("Missed")], width: { size: 1500, type: WidthType.DXA } }),
+        new TableCell({ children: [new Paragraph("Avg Duration")], width: { size: 1500, type: WidthType.DXA } }),
+        new TableCell({ children: [new Paragraph("Compliance")], width: { size: 1500, type: WidthType.DXA } }),
+      ],
+    });
+
+    const taskRows = taskAnalytics.map(
+      (task) =>
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph(task.label)] }),
+            new TableCell({ children: [new Paragraph(String(task.completed))] }),
+            new TableCell({ children: [new Paragraph(String(task.missed))] }),
+            new TableCell({ children: [new Paragraph(task.avg_duration_seconds > 0 ? `${task.avg_duration_seconds}s` : "N/A")] }),
+            new TableCell({ children: [new Paragraph(task.total > 0 ? `${Math.round((task.completed / task.total) * 100)}%` : "N/A")] }),
+          ],
+        }),
+    );
+
+    children.push(
+      new Table({
+        rows: [headerRow, ...taskRows],
+        width: { size: 8500, type: WidthType.DXA },
+      }),
+    );
+  }
+
   // Cow processes
   if (cowProcesses.length > 0) {
     children.push(
       new Paragraph({
         children: [new TextRun({ text: "Cow Processes", bold: true, size: 24 })],
         heading: HeadingLevel.HEADING_1,
+        spacing: { before: 240 },
       }),
     );
 
@@ -181,6 +277,7 @@ export async function generateDocxReport(data: ReportData): Promise<Uint8Array> 
     taskEvents.length > 0
       ? Math.round(taskEvents.reduce((sum, t) => sum + t.duration_seconds, 0) / taskEvents.length)
       : 0;
+  const compliance = taskEvents.length > 0 ? Math.round((completedTasks / taskEvents.length) * 100) : 0;
 
   children.push(
     new Paragraph({
@@ -195,6 +292,7 @@ export async function generateDocxReport(data: ReportData): Promise<Uint8Array> 
     `Total Task Events: ${taskEvents.length}`,
     `Completed Tasks: ${completedTasks}`,
     `Missed Tasks: ${missedTasks}`,
+    `Session Compliance: ${compliance}%`,
     `Average Task Duration: ${avgDuration}s`,
   ];
 

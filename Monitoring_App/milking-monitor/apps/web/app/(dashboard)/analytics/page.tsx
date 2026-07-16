@@ -13,7 +13,7 @@ export default async function AnalyticsPage() {
 
   const score = complianceScore(statistics.missedCount);
   const status = complianceLabel(score);
-  const sessionId = overview.activeSession?.id ?? "latest";
+  const sessionId = overview.activeSession?.id ?? null;
 
   return (
     <div className="page-grid">
@@ -23,7 +23,11 @@ export default async function AnalyticsPage() {
             <span className="label">Reporting period</span>
             <strong>Current operational window · All positions</strong>
           </div>
-          <ReportGenerator sessionId={sessionId} />
+          {sessionId ? (
+            <ReportGenerator sessionId={sessionId} />
+          ) : (
+            <span className="muted">No active session to report</span>
+          )}
         </div>
       </section>
 
