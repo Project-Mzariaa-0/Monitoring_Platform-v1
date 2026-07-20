@@ -25,10 +25,11 @@ export default function LiveSessionBanner({
   estimatedEnd?: string;
   cowCount?: number;
 }) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(0);
 
   useEffect(() => {
     if (!active) return;
+    setNow(Date.now());
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, [active]);
