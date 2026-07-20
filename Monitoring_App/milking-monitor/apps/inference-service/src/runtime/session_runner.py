@@ -137,7 +137,7 @@ class SessionRunner:
         boundary_detector = CowProcessBoundaryDetector(self.thresholds)
 
         frame_count = 0
-        COMPLETION_THRESHOLD = 0.57  # 57% ratio required to mark task as completed
+        COMPLETION_THRESHOLD = 0.50  # 50% ratio required to mark task as completed
 
         # Collect all predictions: task_id -> list of (timestamp, confidence)
         task_predictions: dict[str, list[tuple[str, float]]] = {
