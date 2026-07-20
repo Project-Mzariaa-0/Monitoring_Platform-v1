@@ -137,10 +137,15 @@ class SessionRunner:
         boundary_detector = CowProcessBoundaryDetector(self.thresholds)
 
         frame_count = 0
-        completed_tasks: set[str] = set()
-        task_first_seen: dict[str, str] = {}
-        task_active_since: dict[str, float] = {}  # task_id -> timestamp when first detected
-        MIN_TASK_DURATION = 10.0  # minimum seconds before marking task as completed
+        COMPLETION_THRESHOLD = 0.70  # 70% ratio required to mark task as completed
+
+        # Collect all predictions: task_id -> list of (timestamp, confidence)
+        task_predictions: dict[str, list[tuple[str, float]]] = {
+            "TASK-01": [], "TASK-02": [], "TASK-03": [],
+            "TASK-04": [], "TASK-05": [], "TASK-06": [],
+        }
+        # Track frame-level predictions: what was detected on each frame
+        frame_log: list[dict] = []
 
         try:
             for frame_index, frame in reader.read_frames():
@@ -163,57 +168,24 @@ class SessionRunner:
                         publisher.publish(build_cow_process_event(event))
 
                 detection = manager.detect(frame)
-                if detection and detection.task_id not in completed_tasks:
-                    now_ts = time.time()
-                    now_iso = datetime.now(timezone.utc).isoformat()
-                    
-                    if detection.task_id not in task_first_seen:
-                        task_first_seen[detection.task_id] = now_iso
-                        task_active_since[detection.task_id] = now_ts
-                        logger.info("Session %s: hybrid first saw %s at frame %d", self.session_id, detection.task_id, frame_count)
-                    
-                    # Check minimum duration before marking as completed
-                    elapsed = now_ts - task_active_since[detection.task_id]
-                    if elapsed < MIN_TASK_DURATION:
-                        # Not enough time passed, skip this detection
-                        frame_count += 1
-                        elapsed_loop = time.monotonic() - loop_start
-                        remaining = FRAME_INTERVAL - elapsed_loop
-                        if remaining > 0:
-                            time.sleep(remaining)
-                        else:
-                            time.sleep(MIN_YIELD_SLEEP)
-                        continue
-                    
-                    start_time = task_first_seen[detection.task_id]
-                    duration = int(elapsed)
-                    event = {
-                        "session_id": self.session_id,
+                now_iso = datetime.now(timezone.utc).isoformat()
+
+                if detection:
+                    # Record the prediction
+                    task_predictions[detection.task_id].append((now_iso, detection.confidence))
+                    frame_log.append({
+                        "frame": frame_count,
                         "task_id": detection.task_id,
-                        "cow_position": cow_position,
-                        "status": "completed",
-                        "confidence_score": detection.confidence,
-                        "detected_start_time": start_time,
-                        "detected_end_time": now_iso,
-                        "duration_seconds": duration,
-                    }
-                    publisher.publish(build_task_event(event))
-                    completed_tasks.add(detection.task_id)
-                    logger.info(
-                        "Session %s: hybrid COMPLETED %s (%s) conf=%.2f dur=%ds cow=%d [%d/%d tasks]",
-                        self.session_id,
-                        detection.task_id,
-                        detection.task_name,
-                        detection.confidence,
-                        duration,
-                        cow_position,
-                        len(completed_tasks),
-                        6,
-                    )
+                        "task_name": detection.task_name,
+                        "confidence": detection.confidence,
+                        "timestamp": now_iso,
+                    })
+                    if frame_count % 30 == 0:
+                        logger.info("Session %s: frame %d detected %s (%.2f)", self.session_id, frame_count, detection.task_id, detection.confidence)
 
                 frame_count += 1
                 if frame_count % 100 == 0:
-                    logger.info("Session %s: processed %d frames (%d tasks detected)", self.session_id, frame_count, len(completed_tasks))
+                    logger.info("Session %s: processed %d frames", self.session_id, frame_count)
 
                 elapsed = time.monotonic() - loop_start
                 remaining = FRAME_INTERVAL - elapsed
@@ -224,23 +196,87 @@ class SessionRunner:
         finally:
             manager.release(self.session_id)
 
-        if len(completed_tasks) < 6:
-            missed = {"TASK-01", "TASK-02", "TASK-03", "TASK-04", "TASK-05", "TASK-06"} - completed_tasks
-            missed_confidence = self.thresholds.get("default_unverifiable_confidence", 0.5)
-            now = datetime.now(timezone.utc).isoformat()
-            for task_id in sorted(missed):
+        # === SESSION END: Analyze all collected data ===
+        logger.info("Session %s: session ended, analyzing %d frames of data", self.session_id, frame_count)
+
+        if frame_count == 0:
+            logger.warning("Session %s: no frames processed", self.session_id)
+            return
+
+        completed_tasks: set[str] = set()
+        missed_tasks: set[str] = set()
+
+        for task_id, predictions in task_predictions.items():
+            if not predictions:
+                # Task never detected at all
+                missed_tasks.add(task_id)
+                logger.info("Session %s: %s NEVER DETECTED -> missed", self.session_id, task_id)
+                continue
+
+            # Calculate detection ratio: frames where task was detected / total frames
+            detected_frames = len(predictions)
+            ratio = detected_frames / frame_count
+
+            # Calculate average confidence
+            avg_confidence = sum(c for _, c in predictions) / len(predictions)
+
+            logger.info(
+                "Session %s: %s detected on %d/%d frames (%.1f%%) avg_conf=%.2f",
+                self.session_id, task_id, detected_frames, frame_count, ratio * 100, avg_confidence,
+            )
+
+            if ratio >= COMPLETION_THRESHOLD:
+                # Task passed threshold -> mark as completed
+                completed_tasks.add(task_id)
+                start_time = predictions[0][0]
+                end_time = predictions[-1][0]
+                # Calculate duration from first to last detection
+                try:
+                    t_start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                    t_end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+                    duration = max(0, int((t_end - t_start).total_seconds()))
+                except (ValueError, TypeError):
+                    duration = 0
+
+                event = {
+                    "session_id": self.session_id,
+                    "task_id": task_id,
+                    "cow_position": 1,
+                    "status": "completed",
+                    "confidence_score": avg_confidence,
+                    "detected_start_time": start_time,
+                    "detected_end_time": end_time,
+                    "duration_seconds": duration,
+                }
+                publisher.publish(build_task_event(event))
+                logger.info(
+                    "Session %s: %s COMPLETED (%.1f%% >= 70%%) avg_conf=%.2f dur=%ds",
+                    self.session_id, task_id, ratio * 100, avg_confidence, duration,
+                )
+            else:
+                # Task below threshold -> mark as missed
+                missed_tasks.add(task_id)
+                now = datetime.now(timezone.utc).isoformat()
                 event = {
                     "session_id": self.session_id,
                     "task_id": task_id,
                     "cow_position": 1,
                     "status": "missed",
-                    "confidence_score": missed_confidence,
+                    "confidence_score": avg_confidence,
                     "detected_start_time": now,
                     "detected_end_time": now,
                     "duration_seconds": 0,
                 }
                 publisher.publish(build_task_event(event))
-                logger.info("Session %s: marked %s as missed (not detected)", self.session_id, task_id)
+                logger.info(
+                    "Session %s: %s MISSED (%.1f%% < 70%% threshold)",
+                    self.session_id, task_id, ratio * 100,
+                )
+
+        logger.info(
+            "Session %s: FINAL - %d completed, %d missed out of 6 tasks",
+            self.session_id, len(completed_tasks), len(missed_tasks),
+        )
 
     def stop(self) -> None:
         self.stop_event.set()
