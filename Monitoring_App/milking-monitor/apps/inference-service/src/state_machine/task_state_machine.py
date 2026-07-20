@@ -32,24 +32,24 @@ class TaskStateMachine:
         class_names = {getattr(detection, "class_name", "") for detection in detections}
         events: list[dict] = []
         key = (session_id, cow_position)
-        state = self.active_tasks.get(key, {"completed": set(), "active": False, "start_times": {}})
+        state = self.active_tasks.get(key, {"completed": set(), "active": False, "start_times": {}, "first_seen": {}})
 
         now = datetime.now(timezone.utc).isoformat()
 
         for task_id, required_signals in self.TASK_SIGNALS.items():
-            if not required_signals.issubset(class_names):
-                continue
+            signals_present = required_signals.issubset(class_names)
 
-            if task_id in state["completed"]:
-                continue
+            if signals_present and task_id not in state["completed"]:
+                if task_id not in state["first_seen"]:
+                    state["first_seen"][task_id] = now
 
-            start_times: dict = state.get("start_times", {})  # type: ignore[assignment]
-            start_time = start_times.get(task_id) or now
-            confidence = self._confidence_for_task(task_id)
+                first_seen: dict = state.get("first_seen", {})
+                start_time = first_seen.get(task_id) or now
+                confidence = self._confidence_for_task(task_id)
 
-            events.append(self._event(session_id, cow_position, task_id, "completed", confidence, start_time, now))
-            state["completed"].add(task_id)
-            state["active"] = True
+                events.append(self._event(session_id, cow_position, task_id, "completed", confidence, start_time, now))
+                state["completed"].add(task_id)
+                state["active"] = True
 
         if "teat_cups_attached" not in class_names and state["active"] and self.process_end_task not in state["completed"]:
             missed_confidence = self.thresholds.get("default_unverifiable_confidence", 0.5)

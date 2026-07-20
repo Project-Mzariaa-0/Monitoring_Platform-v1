@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Camera View - Wall Mounted (High Angle)</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e4e4e7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px}
+h1{font-size:18px;font-weight:700;margin-bottom:4px}
+.sub{color:#71717a;font-size:12px;margin-bottom:16px}
+.wrap{display:flex;gap:20px;flex-wrap:wrap;justify-content:center;width:100%;max-width:1100px}
+.cam{position:relative;border-radius:12px;overflow:hidden;border:1px solid #27272a;background:#111}
+canvas{display:block}
+.side{display:flex;flex-direction:column;gap:8px;min-width:240px}
+.btn{padding:8px 12px;border-radius:8px;border:1px solid #27272a;background:#1a1b23;color:#e4e4e7;cursor:pointer;text-align:left;transition:all .15s;font-size:12px}
+.btn:hover{border-color:#3f3f46;background:#27272a}
+.btn.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 15%,#1a1b23)}
+.btn b{display:block}.btn small{color:#71717a;font-size:10px;margin-top:1px;display:block}
+.info{margin-top:8px;padding:10px;border-radius:8px;border:1px solid #27272a;background:#1a1b23;font-size:11px;color:#71717a;line-height:1.5}
+.pb{display:flex;align-items:center;gap:8px;margin-top:8px}
+.pl{padding:5px 12px;border-radius:6px;border:1px solid #3f3f46;background:#27272a;color:#e4e4e7;cursor:pointer;font-size:11px}
+.pl:hover{background:#3f3f46}
+.feature-bar{height:6px;border-radius:3px;background:#27272a;margin-top:3px;overflow:hidden}
+.feature-fill{height:100%;border-radius:3px;transition:width 0.3s}
+.feature-row{display:flex;align-items:center;gap:6px;font-size:10px;color:#71717a;margin-bottom:2px}
+.feature-row span:first-child{width:70px;text-align:right;flex-shrink:0}
+</style>
+</head>
+<body>
+<h1>Camera View — High Wall Mount</h1>
+<p class="sub">Camera mounted high on the wall, looking down at the parlor at an angle</p>
+<div class="wrap">
+<div class="cam"><canvas id="c" width="640" height="480"></canvas></div>
+<div class="side">
+<button class="btn on" style="--c:#f97316" onclick="sel(0)"><b>TASK-01 Pre-cleaning</b><small>Person + spray_bottle</small></button>
+<button class="btn" style="--c:#eab308" onclick="sel(1)"><b>TASK-02 Stripping</b><small>Person + stripping_cup</small></button>
+<button class="btn" style="--c:#22c55e" onclick="sel(2)"><b>TASK-03 Machine attach</b><small>teat_cups_attached</small></button>
+<button class="btn" style="--c:#3b82f6" onclick="sel(3)"><b>TASK-04 Milking</b><small>teat_cups_attached (passive)</small></button>
+<button class="btn" style="--c:#a855f7" onclick="sel(4)"><b>TASK-05 Detachment</b><small>teat_cups_detached</small></button>
+<button class="btn" style="--c:#ec4899" onclick="sel(5)"><b>TASK-06 Post-dip</b><small>Person + dip_applicator</small></button>
+<div class="info" id="inf">
+<b>Camera position:</b> High on wall, looking down at ~30-45 degree angle.<br><br>
+<b>What you see:</b><br>
+- Tops of cow heads and backs (not side view)<br>
+- Person seen from above/behind<br>
+- Center aisle clearly visible between two rows<br>
+- Dip station at bottom-right of frame<br><br>
+<b>Person path:</b> Works on BOTH rows — walks up Row 1, crosses aisle, walks down Row 2.<br><br>
+<b>YOLO detections:</b> Bounding boxes around person, objects, cow parts.
+</div>
+<div id="features" style="margin-top:8px"></div>
+<div class="pb">
+<button class="pl" id="pb" onclick="tog()">&#9654; Play</button>
+<span style="font-size:10px;color:#71717a">Frame</span>
+<span id="frameNum" style="font-size:11px;font-weight:700">0</span>
+</div>
+</div>
+</div>
+<script>
+var cv=document.getElementById("c"),x=cv.getContext("2d"),W=640,H=480;
+var COL=["#f97316","#eab308","#22c55e","#3b82f6","#a855f7","#ec4899"];
+var cur=0,af=0,an=false,frame=0;
+var CX=W/2;
+
+// Perspective: camera high, looking down
+// Top of frame = far from camera (near wall)
+// Bottom of frame = close to camera (below camera)
+function projX(x3,z3){return CX+(x3-CX)*(0.3+0.7*(z3/400))}
+function projY(z3){return 40+(H-80)*(z3/400)}
+function projScale(z3){return 0.3+0.7*(z3/400)}
+
+// 3D cow positions: x=left/right, z=depth (0=far, 400=near)
+var cowData=[];
+for(var i=0;i<6;i++){
+  var z=40+i*60;
+  var s=projScale(z);
+  cowData.push({x3:CX-130,z:z,s:s,row:1,n:i+1});
+  cowData.push({x3:CX+130,z:z,s:s,row:2,n:i+1});
+}
+
+var dipStation={x3:CX+180,z:380,s:projScale(380)};
+
+// Person paths in 3D space (center aisle, stepping to cows)
+function personPath3D(taskIdx,t){
+  var z=360; // start near camera
+  var x=CX;
+  var step="";
+
+  if(taskIdx<=2){
+    // TASK-01/02/03: walk up Row 1, cross aisle, walk down Row 2
+    var totalSegs=24;
+    var seg=Math.floor(t*totalSegs);
+    var lt=(t*totalSegs)%1;
+    var segLen=320/12;
+
+    if(seg<12){
+      // Row 1: walk from near (z=360) to far (z=40), stepping to each cow
+      z=360-seg*segLen-lt*segLen;
+      if(z<40)z=40;
+      if(seg%2===0){
+        var cowIdx=Math.floor(seg/2);
+        x=CX+(CX-130-CX)*lt*0.6;
+        step="Row 1 cow "+(cowIdx+1);
+      } else {
+        x=CX;
+        step="Center aisle";
+      }
+    } else {
+      // Row 2: walk from far (z=40) back to near (z=360), stepping to each cow
+      var seg2=seg-12;
+      z=40+seg2*segLen+lt*segLen;
+      if(z>360)z=360;
+      if(seg2%2===0){
+        var cowIdx=Math.floor(seg2/2);
+        x=CX+(CX+130-CX)*lt*0.6;
+        step="Row 2 cow "+(cowIdx+1);
+      } else {
+        x=CX;
+        step="Center aisle";
+      }
+    }
+  } else if(taskIdx===3){
+    // TASK-04: standing in center, slight movement
+    z=200+Math.sin(t*Math.PI*4)*30;
+    x=CX+Math.sin(t*Math.PI*3)*8;
+    step="Monitoring";
+  } else if(taskIdx===4){
+    // TASK-05: standing in center
+    z=200+Math.sin(t*Math.PI*2)*20;
+    x=CX;
+    step="Waiting";
+  } else {
+    // TASK-06: go to dip station, walk Row 2 up, cross, walk Row 1 down, return cup
+    if(t<0.12){
+      var lt=t/0.12;
+      x=CX+(dipStation.x3-CX)*lt;
+      z=360-(360-dipStation.z)*lt;
+      step="To dip station";
+    } else if(t<0.2){
+      x=dipStation.x3;z=dipStation.z;step="Filling cup";
+    } else if(t<0.6){
+      // Walk up Row 2
+      var t2=(t-0.2)/0.4;
+      z=360-t2*320;
+      if(z<40)z=40;
+      if(Math.floor(t2*6)%2===0){x=CX+(CX+130-CX)*0.5;step="Row 2 cow "+(Math.floor(t2*6)+1);}
+      else{x=CX;step="Center aisle";}
+    } else if(t<0.65){
+      // Cross aisle
+      var lt=(t-0.6)/0.05;
+      x=CX+(CX-130-CX)*lt;z=40;step="Crossing to Row 1";
+    } else {
+      // Walk down Row 1
+      var t3=(t-0.65)/0.35;
+      z=40+t3*320;
+      if(z>360)z=360;
+      if(Math.floor(t3*6)%2===0){x=CX-130*0.5;step="Row 1 cow "+(Math.floor(t3*6)+1);}
+      else{x=CX;step="Center aisle";}
+    }
+  }
+  return{x3:x,z:Math.max(40,Math.min(360,z)),step:step};
+}
+
+function drawScene(){
+  x.clearRect(0,0,W,H);
+
+  // Background gradient (ceiling far, floor near)
+  var grd=x.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,'#1a1b23');
+  grd.addColorStop(0.3,'#1e1f2b');
+  grd.addColorStop(1,'#252630');
+  x.fillStyle=grd;x.fillRect(0,0,W,H);
+
+  // Wall at far end
+  x.fillStyle='#16161e';
+  x.fillRect(0,0,W,50);
+  x.fillStyle='#27272a';x.fillRect(0,48,W,2);
+
+  // Floor perspective lines
+  x.strokeStyle='#2a2a35';x.lineWidth=1;
+  for(var i=0;i<8;i++){
+    var z=i*50;
+    var y=projY(z);
+    x.beginPath();x.moveTo(0,y);x.lineTo(W,y);x.stroke();
+  }
+
+  // Center aisle lines (perspective)
+  x.strokeStyle='#ffffff08';x.lineWidth=1;
+  x.beginPath();x.moveTo(CX-15,projY(40));x.lineTo(CX-40,projY(360));x.stroke();
+  x.beginPath();x.moveTo(CX+15,projY(40));x.lineTo(CX+40,projY(360));x.stroke();
+
+  // Row 1 zone
+  x.fillStyle='rgba(59,130,246,0.03)';
+  x.beginPath();x.moveTo(CX-50,projY(40));x.lineTo(CX-200,projY(360));x.lineTo(CX-50,projY(360));x.closePath();x.fill();
+
+  // Row 2 zone
+  x.beginPath();x.moveTo(CX+50,projY(40));x.lineTo(CX+200,projY(360));x.lineTo(CX+50,projY(360));x.closePath();x.fill();
+
+  // Draw cows (sorted by depth, far first)
+  var sorted=cowData.slice().sort(function(a,b){return a.z-b.z});
+  sorted.forEach(function(c){
+    var px=projX(c.x3,c.z);
+    var py=projY(c.z);
+    var s=c.s;
+    var cw=50*s, ch=25*s;
+
+    // Cow body (seen from above - oval)
+    x.fillStyle='#3a3a45';
+    x.beginPath();x.ellipse(px,py,cw,ch,0,0,Math.PI*2);x.fill();
+    x.strokeStyle='#4a4a55';x.lineWidth=1;x.stroke();
+
+    // Head (front of cow)
+    var headDir=c.row===1?-1:1;
+    x.fillStyle='#4a4a55';
+    x.beginPath();x.ellipse(px+headDir*cw*0.7,py,cw*0.3,ch*0.5,0,0,Math.PI*2);x.fill();
+
+    // Back ridge (seen from above)
+    x.strokeStyle='#52525b';x.lineWidth=1;
+    x.beginPath();x.moveTo(px-cw*0.5,py);x.lineTo(px+cw*0.5,py);x.stroke();
+
+    // Udder area (visible from high angle when cups attached)
+    if(cur>=2&&cur<=4){
+      x.fillStyle='#ff6b6b30';
+      x.beginPath();x.ellipse(px,py+ch*0.5,cw*0.2,ch*0.3,0,0,Math.PI*2);x.fill();
+    }
+
+    x.fillStyle='#a1a1aa';x.font='bold '+(8+s*6)+'px system-ui';x.textAlign='center';
+    x.fillText('C'+c.n,px,py+3);
+  });
+
+  // Dip station
+  var dx=projX(dipStation.x3,dipStation.z);
+  var dy=projY(dipStation.z);
+  var ds=dipStation.s;
+  x.fillStyle='#3a1515';x.strokeStyle='#ef4444';x.lineWidth=2;
+  x.beginPath();x.roundRect(dx-30*ds,dy-15*ds,60*ds,30*ds,4);x.fill();x.stroke();
+  x.fillStyle='#ef4444';x.font='bold '+(8+ds*4)+'px system-ui';x.textAlign='center';
+  x.fillText('DIP',dx,dy+3);
+
+  // Camera position indicator (top of frame = camera)
+  x.fillStyle='#3b82f640';
+  x.beginPath();x.moveTo(CX-20,0);x.lineTo(CX+20,0);x.lineTo(CX+40,30);x.lineTo(CX-40,30);x.closePath();x.fill();
+  x.fillStyle='#3b82f6';x.font='bold 9px system-ui';x.textAlign='center';
+  x.fillText('CAMERA (high on wall)',CX,15);
+
+  // Viewing angle cone
+  x.strokeStyle='#3b82f615';x.lineWidth=1;x.setLineDash([4,4]);
+  x.beginPath();x.moveTo(CX,25);x.lineTo(30,H);x.stroke();
+  x.beginPath();x.moveTo(CX,25);x.lineTo(W-30,H);x.stroke();
+  x.setLineDash([]);
+
+  // Labels
+  x.fillStyle='#3f3f46';x.font='10px system-ui';x.textAlign='center';
+  x.fillText('ROW 1',CX-150,H-10);
+  x.fillText('ROW 2',CX+150,H-10);
+  x.fillText('CENTER AISLE',CX,H-10);
+}
+
+function drawPerson(){
+  var t=an?(af%300)/300:0.4;
+  var pos=personPath3D(cur,t);
+  var px=projX(pos.x3,pos.z);
+  var py=projY(pos.z);
+  var s=projScale(pos.z);
+  var ph=40*s,pw=ph*0.4;
+
+  // Shadow
+  x.fillStyle='rgba(0,0,0,0.25)';
+  x.beginPath();x.ellipse(px,py+ph*0.5,pw*0.8,3*s,0,0,Math.PI*2);x.fill();
+
+  // Body (seen from above/behind)
+  x.fillStyle=COL[cur];
+  x.beginPath();
+  x.ellipse(px,py,pw,ph*0.35,0,0,Math.PI*2);
+  x.fill();
+
+  // Head (top of person, seen from above)
+  x.beginPath();x.arc(px,py-ph*0.1,pw*0.45,0,Math.PI*2);x.fill();
+  x.fillStyle=COL[cur]+'aa';
+  x.beginPath();x.arc(px-1,py-ph*0.12,pw*0.25,0,Math.PI*2);x.fill();
+
+  // YOLO bounding box
+  x.strokeStyle='#22c55e';x.lineWidth=2;x.setLineDash([4,2]);
+  x.strokeRect(px-pw*1.2,py-ph*0.5,pw*2.4,ph*1.1);
+  x.setLineDash([]);
+  x.fillStyle='#22c55e';x.font='bold 9px system-ui';x.textAlign='left';
+  x.fillText('person '+(0.82+Math.random()*0.15).toFixed(2),px-pw*1.2,py-ph*0.55);
+
+  // Object detection
+  var objMap={
+    0:{name:'spray_bottle',ox:px+pw*1.5,oy:py},
+    1:{name:'stripping_cup',ox:px+pw*1.5,oy:py},
+    2:{name:'teat_cups_attached',ox:px,oy:py+ph*0.4},
+    3:{name:'teat_cups_attached',ox:px,oy:py+ph*0.4},
+    4:{name:'teat_cups_detached',ox:px,oy:py+ph*0.4},
+    5:{name:'dip_applicator',ox:px+pw*1.5,oy:py}
+  };
+  var obj=objMap[cur];
+  if(obj){
+    x.strokeStyle='#eab308';x.lineWidth=1.5;x.setLineDash([3,2]);
+    x.strokeRect(obj.ox-12*s,obj.oy-8*s,24*s,16*s);
+    x.setLineDash([]);
+    x.fillStyle='#eab308';x.font='bold '+(7+s*3)+'px system-ui';x.textAlign='left';
+    x.fillText(obj.name,obj.ox-12*s,obj.oy-10*s);
+  }
+
+  return pos;
+}
+
+function drawFeatures(p){
+  var feats=[
+    {name:'Person Y',val:1-p.z/360,hue:210},
+    {name:'Person X',val:Math.abs(p.x3-CX)/(W/2),hue:260},
+    {name:'Row 1 prox',val:Math.max(0,1-Math.abs(p.x3-CX+130)/200),hue:150},
+    {name:'Row 2 prox',val:Math.max(0,1-Math.abs(p.x3-CX-130)/200),hue:150},
+    {name:'Motion',val:an?0.3+Math.random()*0.4:0.1,hue:30},
+    {name:'Objects',val:cur<2?0.8:cur<5?0.5:0.9,hue:45},
+    {name:'Temporal',val:0.2+af/500,hue:180}
+  ];
+  document.getElementById('features').innerHTML=feats.map(function(f){
+    var pct=Math.min(100,Math.round(f.val*100));
+    return '<div class="feature-row"><span>'+f.name+'</span><div style="flex:1"><div class="feature-bar"><div class="feature-fill" style="width:'+pct+'%;background:hsl('+f.hue+',60%,50%)"></div></div></div><span style="width:30px">'+pct+'%</span></div>';
+  }).join('');
+}
+
+function render(){
+  drawScene();
+  var pp=drawPerson();
+  drawFeatures(pp);
+  document.getElementById('frameNum').textContent=frame;
+  if(an){af+=2;frame++;if(af>300)af=0;requestAnimationFrame(render)}
+}
+function sel(i){cur=i;document.querySelectorAll('.btn').forEach(function(b,j){b.className=j===i?'btn on':'btn'});af=0;frame=0;if(!an)render()}
+function tog(){an=!an;document.getElementById('pb').innerHTML=an?'&#9724; Pause':'&#9654; Play';if(an)render()}
+render();
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import { publish } from "../../../../lib/realtime/broadcast";
-import { ingestTaskEvent } from "../../../../lib/data/store";
+import { ingestTaskEvent, updateCowProcess } from "../../../../lib/data/store";
 import { rateLimit } from "../../../../lib/security/rate-limit";
 import { z } from "zod";
 
@@ -13,6 +13,8 @@ const ingestEventSchema = z.object({
   detected_start_time: z.string().nullable().optional(),
   detected_end_time: z.string().nullable().optional(),
   duration_seconds: z.number().optional(),
+  process_status: z.string().optional(),
+  detected_time: z.string().optional(),
 }).passthrough();
 
 export async function POST(request: Request) {
@@ -62,6 +64,16 @@ export async function POST(request: Request) {
       });
     } catch {
       // DB write failed — events still broadcast via SSE
+    }
+  }
+
+  if (parsed.data.event_type === "cow_process" && parsed.data.cow_position) {
+    try {
+      const processStatus = parsed.data.process_status as "started" | "completed" | undefined;
+      const detectedTime = parsed.data.detected_time as string | undefined;
+      await updateCowProcess(sessionId, parsed.data.cow_position as 1 | 2, processStatus, detectedTime);
+    } catch {
+      // DB write failed
     }
   }
 

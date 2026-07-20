@@ -100,16 +100,21 @@ export async function listSessions(): Promise<SessionRecord[]> {
 export async function listActiveSessions(): Promise<SessionRecord[]> {
   const now = new Date().toISOString();
 
-  await db
-    .update(sessions)
-    .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
-    .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+  try {
+    await db
+      .update(sessions)
+      .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
+      .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+  } catch { /* table may not exist */ }
 
-  const rows = await db
-    .select()
-    .from(sessions)
-    .where(inArray(sessions.status, ["scheduled", "active"]))
-    .orderBy(desc(sessions.scheduled_start_time));
+  let rows: any[] = [];
+  try {
+    rows = await db
+      .select()
+      .from(sessions)
+      .where(inArray(sessions.status, ["scheduled", "active"]))
+      .orderBy(desc(sessions.scheduled_start_time));
+  } catch { /* table may not exist */ }
 
   return rows.map((r) => ({
     id: r.id,
@@ -133,12 +138,17 @@ export async function getSession(sessionId: string): Promise<SessionRecord | nul
   const now = new Date().toISOString();
 
   // Auto-complete 30 minutes after estimated end time
-  await db
-    .update(sessions)
-    .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
-    .where(and(eq(sessions.id, sessionId), inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+  try {
+    await db
+      .update(sessions)
+      .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
+      .where(and(eq(sessions.id, sessionId), inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+  } catch { /* table may not exist */ }
 
-  const [row] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+  let row: any = null;
+  try {
+    [row] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+  } catch { /* table may not exist */ }
   if (!row) return null;
   return {
     id: row.id,
@@ -169,7 +179,8 @@ export async function getSessionDetails(
   const session = await getSession(sessionId);
   if (!session) return null;
 
-  const cowRows = await db.select().from(cowProcesses).where(eq(cowProcesses.session_id, sessionId)).orderBy(cowProcesses.cow_position);
+  let cowRows: any[] = [];
+  try { cowRows = await db.select().from(cowProcesses).where(eq(cowProcesses.session_id, sessionId)).orderBy(cowProcesses.cow_position); } catch { /* table may not exist */ }
   const cowProcessesRecords: CowProcessRecord[] = cowRows.map((r) => ({
     id: r.id,
     session_id: r.session_id,
@@ -180,10 +191,10 @@ export async function getSessionDetails(
   }));
 
   const cowIds = cowProcessesRecords.map((c) => c.id);
-  const taskRows =
-    cowIds.length > 0
-      ? await db.select().from(taskEvents).where(inArray(taskEvents.cow_process_id, cowIds)).orderBy(taskEvents.created_at)
-      : [];
+  let taskRows: any[] = [];
+  if (cowIds.length > 0) {
+    try { taskRows = await db.select().from(taskEvents).where(inArray(taskEvents.cow_process_id, cowIds)).orderBy(taskEvents.created_at); } catch { /* table may not exist */ }
+  }
   const taskEventsRecords: TaskEventRecord[] = taskRows.map((r) => ({
     id: r.id,
     cow_process_id: r.cow_process_id,
@@ -198,7 +209,8 @@ export async function getSessionDetails(
     overridden_at: toISO(r.overridden_at) ?? undefined,
   }));
 
-  const reportRows = await db.select().from(reports).where(eq(reports.session_id, sessionId)).orderBy(desc(reports.generated_at));
+  let reportRows: any[] = [];
+  try { reportRows = await db.select().from(reports).where(eq(reports.session_id, sessionId)).orderBy(desc(reports.generated_at)); } catch { /* table may not exist */ }
   const reportRecords: ReportRecord[] = reportRows.map((r) => ({
     id: r.id,
     session_id: r.session_id,
@@ -374,6 +386,35 @@ export async function updateSessionStatus(
   };
 }
 
+export async function updateCowProcess(
+  sessionId: string,
+  cowPosition: 1 | 2,
+  processStatus: "started" | "completed" | undefined,
+  detectedTime: string | undefined,
+): Promise<void> {
+  const [cow] = await db
+    .select()
+    .from(cowProcesses)
+    .where(and(eq(cowProcesses.session_id, sessionId), eq(cowProcesses.cow_position, cowPosition)))
+    .limit(1);
+
+  if (!cow) return;
+
+  const time = detectedTime ? new Date(detectedTime) : new Date();
+
+  if (processStatus === "started") {
+    await db
+      .update(cowProcesses)
+      .set({ detected_start_time: time, overall_status: "in_progress", updated_at: new Date() })
+      .where(eq(cowProcesses.id, cow.id));
+  } else if (processStatus === "completed") {
+    await db
+      .update(cowProcesses)
+      .set({ detected_end_time: time, overall_status: "completed", updated_at: new Date() })
+      .where(eq(cowProcesses.id, cow.id));
+  }
+}
+
 export async function ingestTaskEvent(input: {
   session_id: string;
   cow_position: 1 | 2;
@@ -414,6 +455,17 @@ export async function ingestTaskEvent(input: {
     .returning();
 
   if (!inserted) return null;
+
+  if (input.status === "completed") {
+    if (input.task_id === "TASK-03" && !cow.detected_start_time) {
+      const startTime = detectedStart ? new Date(detectedStart) : new Date();
+      await db.update(cowProcesses).set({ detected_start_time: startTime, overall_status: "in_progress", updated_at: new Date() }).where(eq(cowProcesses.id, cow.id));
+    }
+    if (input.task_id === "TASK-05") {
+      const endTime = detectedEnd ? new Date(detectedEnd) : new Date();
+      await db.update(cowProcesses).set({ detected_end_time: endTime, overall_status: "completed", updated_at: new Date() }).where(eq(cowProcesses.id, cow.id));
+    }
+  }
 
   return {
     id: inserted.id,
@@ -473,7 +525,7 @@ export async function overrideTaskEvent(
   };
 }
 
-export async function createReport(sessionId: string, docxFileUrl: string): Promise<ReportRecord> {
+export async function createReport(sessionId: string, docxFileUrl: string | null): Promise<ReportRecord> {
   const now = new Date();
   const [inserted] = await db
     .insert(reports)
@@ -505,15 +557,18 @@ export async function getStatistics(): Promise<{
   averageDuration: number;
   reports: ReportRecord[];
 }> {
-  const sessionRows = await db.select().from(sessions);
+  let sessionRows: any[] = [];
+  try { sessionRows = await db.select().from(sessions); } catch { /* table may not exist */ }
   const totalSessions = sessionRows.length;
   const completedSessions = sessionRows.filter((s) => s.status === "completed").length;
 
-  const taskRows = await db.select().from(taskEvents);
+  let taskRows: any[] = [];
+  try { taskRows = await db.select().from(taskEvents); } catch { /* table may not exist */ }
   const missedCount = taskRows.filter((t) => t.status === "missed" || t.override_status === "missed").length;
   const averageDuration = taskRows.length === 0 ? 0 : Math.round(taskRows.reduce((sum, t) => sum + Number(t.duration_seconds), 0) / taskRows.length);
 
-  const reportRows = await db.select().from(reports).orderBy(desc(reports.generated_at));
+  let reportRows: any[] = [];
+  try { reportRows = await db.select().from(reports).orderBy(desc(reports.generated_at)); } catch { /* table may not exist */ }
   const reportsRecords: ReportRecord[] = reportRows.map((r) => ({
     id: r.id,
     session_id: r.session_id,
@@ -536,20 +591,25 @@ export async function getMonitoringOverview(): Promise<{
   const now = new Date().toISOString();
 
   // Auto-complete sessions 30 minutes after their estimated end time
-  await db
-    .update(sessions)
-    .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
-    .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+  try {
+    await db
+      .update(sessions)
+      .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
+      .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+  } catch { /* table may not exist */ }
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  const totalSessionRows = await db.select().from(sessions).where(sql`${sessions.created_at} >= ${todayStart}`);
+  let totalSessionRows: any[] = [];
+  try { totalSessionRows = await db.select().from(sessions).where(sql`${sessions.created_at} >= ${todayStart}`); } catch { /* table may not exist */ }
   const totalSessions = totalSessionRows.length;
   const activeCount = totalSessionRows.filter((s) => s.status === "active" || s.status === "scheduled").length;
 
-  const activeSessionRow =
-    (await db.select().from(sessions).where(inArray(sessions.status, ["active", "scheduled"])).orderBy(desc(sessions.updated_at)).limit(1)).at(0) ?? null;
+  let activeSessionRow: any = null;
+  try {
+    activeSessionRow = (await db.select().from(sessions).where(inArray(sessions.status, ["active", "scheduled"])).orderBy(desc(sessions.updated_at)).limit(1)).at(0) ?? null;
+  } catch { /* table may not exist */ }
 
   const activeSession: SessionRecord | null = activeSessionRow
     ? {
@@ -570,40 +630,48 @@ export async function getMonitoringOverview(): Promise<{
       }
     : null;
 
-  const activeCowProcesses: CowProcessRecord[] = activeSession
-    ? (await db
+  let activeCowProcessesRaw: any[] = [];
+  if (activeSession) {
+    try {
+      activeCowProcessesRaw = await db
         .select()
         .from(cowProcesses)
         .where(eq(cowProcesses.session_id, activeSession.id))
-        .orderBy(cowProcesses.cow_position)).map((r) => ({
-        id: r.id,
-        session_id: r.session_id,
-        cow_position: Number(r.cow_position) as 1 | 2,
-        detected_start_time: toISO(r.detected_start_time),
-        detected_end_time: toISO(r.detected_end_time),
-        overall_status: r.overall_status as CowProcessRecord["overall_status"],
-      }))
-    : [];
+        .orderBy(cowProcesses.cow_position);
+    } catch { /* table may not exist */ }
+  }
+  const activeCowProcesses: CowProcessRecord[] = activeCowProcessesRaw.map((r) => ({
+    id: r.id,
+    session_id: r.session_id,
+    cow_position: Number(r.cow_position) as 1 | 2,
+    detected_start_time: toISO(r.detected_start_time),
+    detected_end_time: toISO(r.detected_end_time),
+    overall_status: r.overall_status as CowProcessRecord["overall_status"],
+  }));
 
   const cowIds = activeCowProcesses.map((c) => c.id);
-  const activeTaskEvents: TaskEventRecord[] =
-    cowIds.length > 0
-      ? (await db.select().from(taskEvents).where(inArray(taskEvents.cow_process_id, cowIds)).orderBy(taskEvents.created_at)).map((r) => ({
-          id: r.id,
-          cow_process_id: r.cow_process_id,
-          task_id: r.task_id as TaskEventRecord["task_id"],
-          detected_start_time: toISO(r.detected_start_time),
-          detected_end_time: toISO(r.detected_end_time),
-          duration_seconds: Number(r.duration_seconds),
-          status: r.status as TaskEventRecord["status"],
-          override_status: (r.override_status as TaskEventRecord["override_status"]) ?? undefined,
-          override_reason: r.override_reason ?? undefined,
-          overridden_by: r.overridden_by ?? undefined,
-          overridden_at: r.overridden_at ? toISO(r.overridden_at) ?? undefined : undefined,
-        }))
-      : [];
+  let activeTaskEventsRaw: any[] = [];
+  if (cowIds.length > 0) {
+    try {
+      activeTaskEventsRaw = await db.select().from(taskEvents).where(inArray(taskEvents.cow_process_id, cowIds)).orderBy(taskEvents.created_at);
+    } catch { /* table may not exist */ }
+  }
+  const activeTaskEvents: TaskEventRecord[] = activeTaskEventsRaw.map((r) => ({
+    id: r.id,
+    cow_process_id: r.cow_process_id,
+    task_id: r.task_id as TaskEventRecord["task_id"],
+    detected_start_time: toISO(r.detected_start_time),
+    detected_end_time: toISO(r.detected_end_time),
+    duration_seconds: Number(r.duration_seconds),
+    status: r.status as TaskEventRecord["status"],
+    override_status: (r.override_status as TaskEventRecord["override_status"]) ?? undefined,
+    override_reason: r.override_reason ?? undefined,
+    overridden_by: r.overridden_by ?? undefined,
+    overridden_at: r.overridden_at ? toISO(r.overridden_at) ?? undefined : undefined,
+  }));
 
-  const taskRows = await db.select().from(taskEvents);
+  let taskRows: any[] = [];
+  try { taskRows = await db.select().from(taskEvents); } catch { /* table may not exist */ }
   const missedCount = taskRows.filter((t) => t.status === "missed" || t.override_status === "missed").length;
 
   return { activeSession, activeCowProcesses, activeTaskEvents, totalSessions, activeCount, missedCount };
@@ -648,9 +716,12 @@ export type TaskAnalytics = {
 };
 
 export async function getEmployeeAnalytics(): Promise<EmployeeAnalytics[]> {
-  const allSessions = await db.select().from(sessions);
-  const allCowProcesses = await db.select().from(cowProcesses);
-  const allTaskEvents = await db.select().from(taskEvents);
+  let allSessions: any[] = [];
+  let allCowProcesses: any[] = [];
+  let allTaskEvents: any[] = [];
+  try { allSessions = await db.select().from(sessions); } catch { /* table may not exist */ }
+  try { allCowProcesses = await db.select().from(cowProcesses); } catch { /* table may not exist */ }
+  try { allTaskEvents = await db.select().from(taskEvents); } catch { /* table may not exist */ }
 
   const sessionMap = new Map(allSessions.map((s) => [s.id, s]));
   const cowProcessMap = new Map(allCowProcesses.map((c) => [c.id, c]));
@@ -700,7 +771,8 @@ export async function getEmployeeAnalytics(): Promise<EmployeeAnalytics[]> {
 }
 
 export async function getTaskAnalytics(): Promise<TaskAnalytics[]> {
-  const allTaskEvents = await db.select().from(taskEvents);
+  let allTaskEvents: any[] = [];
+  try { allTaskEvents = await db.select().from(taskEvents); } catch { /* table may not exist */ }
 
   const grouped = new Map<string, { total: number; completed: number; missed: number; totalDuration: number }>();
 

@@ -16,7 +16,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from config import load_config, ModelConfig
-from detection.enhanced_yolo import EnhancedYOLODetector
+from detection.pose_feature_extractor import PoseFeatureExtractor
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ def step2_extract_features(config: ModelConfig, frames_dir: str, features_dir: s
     logger.info("STEP 2: Extracting motion-aware sequence features (512-dim)")
     logger.info("=" * 60)
 
-    detector = EnhancedYOLODetector(config)
+    detector = PoseFeatureExtractor(config)
     frames_path = Path(frames_dir)
     features_path = Path(features_dir)
     features_path.mkdir(parents=True, exist_ok=True)

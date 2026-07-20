@@ -8,7 +8,7 @@ export const reports = pgTable(reportsTable, {
   session_id: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
   generated_at: timestamp("generated_at", { withTimezone: true }).notNull(),
 
-  docx_file_url: text("docx_file_url").notNull(),
+  docx_file_url: text("docx_file_url"),
   email_sent_at: timestamp("email_sent_at", { withTimezone: true }),
 
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

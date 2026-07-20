@@ -1,5 +1,6 @@
 import { getStatistics } from "../../../lib/data/store";
 import ReportGenerator from "../../../components/reports/report-generator";
+import ReportDownloadButton from "../../../components/reports/report-download-button";
 
 export default async function ReportsPage() {
   const statistics = await getStatistics();
@@ -32,9 +33,7 @@ export default async function ReportsPage() {
                     Generated {new Date(report.generated_at).toLocaleString()}
                   </div>
                 </div>
-                <a className="button button-secondary" href={report.docx_file_url}>
-                  Download
-                </a>
+                <ReportDownloadButton sessionId={report.session_id} />
               </div>
             ))
           )}

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Milking Parlor Layout</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e4e4e7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px}
+h1{font-size:20px;font-weight:700;margin-bottom:4px}
+.sub{color:#71717a;font-size:13px;margin-bottom:20px}
+.wrap{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;width:100%;max-width:1100px}
+canvas{border-radius:12px;background:#1a1b23;border:1px solid #27272a}
+.side{display:flex;flex-direction:column;gap:8px;min-width:220px}
+.btn{padding:10px 14px;border-radius:10px;border:1px solid #27272a;background:#1a1b23;color:#e4e4e7;cursor:pointer;text-align:left;transition:all .15s;font-size:13px}
+.btn:hover{border-color:#3f3f46;background:#27272a}
+.btn.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 15%,#1a1b23)}
+.btn b{display:block}.btn small{color:#71717a;font-size:11px;margin-top:2px;display:block}
+.leg{margin-top:12px;padding:12px;border-radius:10px;border:1px solid #27272a;background:#1a1b23;font-size:12px}
+.lr{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.ld{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.info{margin-top:12px;padding:12px;border-radius:10px;border:1px solid #27272a;background:#1a1b23;font-size:12px;color:#71717a;line-height:1.5}
+.pb{display:flex;align-items:center;gap:10px;margin-top:12px}
+.pl{padding:6px 16px;border-radius:8px;border:1px solid #3f3f46;background:#27272a;color:#e4e4e7;cursor:pointer;font-size:12px}
+.pl:hover{background:#3f3f46}
+.sl{font-size:11px;color:#71717a}
+.cam-view{margin-top:12px;padding:12px;border-radius:10px;border:1px solid #27272a;background:#1a1b23;font-size:11px;color:#71717a;line-height:1.5}
+.cam-view b{color:#e4e4e7}
+</style>
+</head>
+<body>
+<h1>Milking Parlor Layout</h1>
+<p class="sub">Top-down view &mdash; Camera at bottom looking up at the rows</p>
+<div class="wrap">
+<div><canvas id="c" width="520" height="620"></canvas></div>
+<div class="side">
+<button class="btn on" style="--c:#f97316" onclick="sel(0)"><b>TASK-01 &middot; Pre-cleaning</b><small>Spray water on each teat with pipe</small></button>
+<button class="btn" style="--c:#eab308" onclick="sel(1)"><b>TASK-02 &middot; Stripping</b><small>Apply stripping cups one by one</small></button>
+<button class="btn" style="--c:#22c55e" onclick="sel(2)"><b>TASK-03 &middot; Machine attachment</b><small>Attach teat cups to each cow</small></button>
+<button class="btn" style="--c:#3b82f6" onclick="sel(3)"><b>TASK-04 &middot; Milking</b><small>Automatic &mdash; employee is passive</small></button>
+<button class="btn" style="--c:#a855f7" onclick="sel(4)"><b>TASK-05 &middot; Detachment</b><small>Cups removed automatically</small></button>
+<button class="btn" style="--c:#ec4899" onclick="sel(5)"><b>TASK-06 &middot; Post-dip</b><small>Fill at dip station, apply to teats</small></button>
+<div class="leg">
+<div class="lr"><div class="ld" style="background:#52525b"></div> Cow (side view)</div>
+<div class="lr"><div class="ld" style="background:#f97316"></div> Employee</div>
+<div class="lr"><div class="ld" style="background:#ef4444"></div> Dip Station</div>
+<div class="lr"><div class="ld" style="background:#3b82f6"></div> Camera (bottom)</div>
+</div>
+<div class="pb">
+<button class="pl" id="pb" onclick="tog()">&#9654; Play</button>
+<span class="sl">Speed</span>
+<input type="range" min="1" max="5" value="3" id="sp" style="width:80px">
+</div>
+<div class="cam-view"><b>Camera view:</b> Sees cows from the side, dip station at bottom-right of frame, rows extend away from camera.</div>
+<div class="info" id="inf">Click a task to visualize employee movement path.</div>
+</div>
+</div>
+<script>
+var cv=document.getElementById("c"),x=cv.getContext("2d"),W=520,H=620;
+var COL=["#f97316","#eab308","#22c55e","#3b82f6","#a855f7","#ec4899"];
+var INFO=[
+"Employee holds spray pipe, walks from camera end up Row 1, crosses, comes back down Row 2.",
+"Employee grabs stripping cups, walks up Row 1 applying to each cow, crosses, back down Row 2.",
+"Employee holds teat cups, walks up Row 1 attaching to each cow, crosses, back down Row 2.",
+"Milking is automatic (~8 min). Employee stands in center aisle near camera, monitoring.",
+"Cups detach automatically. Employee stays in center aisle, may assist if needed.",
+"Employee fills at dip station (bottom-right), walks up Row 2 applying dip, crosses, back down Row 1, returns cup."
+];
+var cur=0,af=0,an=false,ai=null;
+
+var R1X=140, R2X=380, CX=260;
+var EY=H-80, BY=80;
+var SP=72, CC=6;
+var DIP={x:430,y:H-100,w:64,h:44};
+var CAM={x:CX,y:H-25};
+
+var cows=[];
+for(var i=0;i<CC;i++){
+  cows.push({x:R1X, y:BY+i*SP, r:1, n:i+1});
+  cows.push({x:R2X, y:BY+i*SP, r:2, n:i+1});
+}
+var r1=cows.filter(function(c){return c.r===1});
+var r2=cows.filter(function(c){return c.r===2});
+
+var paths=[
+  // TASK-01: Pre-cleaning — walk center aisle, step left to Row 1 each cow, then step right to Row 2
+  [{x:CX,y:EY}].concat(
+    r1.map(function(c){return{x:R1X-30,y:c.y},{x:CX,y:c.y}}),
+    [{x:CX,y:BY+(CC-1)*SP+30}],
+    r2.slice().reverse().map(function(c){return{x:R2X+30,y:c.y},{x:CX,y:c.y}}),
+    [{x:CX,y:EY}]
+  ),
+  // TASK-02: Stripping — same center-aisle pattern
+  [{x:CX,y:EY}].concat(
+    r1.map(function(c){return{x:R1X-30,y:c.y},{x:CX,y:c.y}}),
+    [{x:CX,y:BY+(CC-1)*SP+30}],
+    r2.slice().reverse().map(function(c){return{x:R2X+30,y:c.y},{x:CX,y:c.y}}),
+    [{x:CX,y:EY}]
+  ),
+  // TASK-03: Machine attachment — same center-aisle pattern
+  [{x:CX,y:EY}].concat(
+    r1.map(function(c){return{x:R1X-30,y:c.y},{x:CX,y:c.y}}),
+    [{x:CX,y:BY+(CC-1)*SP+30}],
+    r2.slice().reverse().map(function(c){return{x:R2X+30,y:c.y},{x:CX,y:c.y}}),
+    [{x:CX,y:EY}]
+  ),
+  // TASK-04: Milking — passive, stays in center aisle
+  [{x:CX,y:EY},{x:CX,y:EY-80},{x:CX,y:EY-160},{x:CX,y:EY-80}],
+  // TASK-05: Detachment — stays in center aisle
+  [{x:CX,y:EY-80},{x:CX,y:EY-160},{x:CX,y:EY-80}],
+  // TASK-06: Post-dip — go to dip station, then walk center aisle stepping right to Row 2, cross, step left to Row 1, return cup
+  [{x:CX,y:EY-60},{x:DIP.x,y:DIP.y},{x:DIP.x,y:DIP.y}].concat(
+    r2.slice().reverse().map(function(c){return{x:R2X+30,y:c.y},{x:CX,y:c.y}}),
+    [{x:CX,y:BY-10}],
+    r1.map(function(c){return{x:R1X-30,y:c.y},{x:CX,y:c.y}}),
+    [{x:DIP.x,y:DIP.y},{x:CX,y:EY-60}]
+  )
+];
+
+function lerp(a,b,t){return a+(b-a)*t}
+function gpos(p,pr){if(pr<=0)return p[0];if(pr>=1)return p[p.length-1];var ts=p.length-1,sp=pr*ts,si=Math.min(Math.floor(sp),ts-1),t=sp-si;return{x:lerp(p[si].x,p[si+1].x,t),y:lerp(p[si].y,p[si+1].y,t)}}
+
+function draw(){
+  x.clearRect(0,0,W,H);
+  x.fillStyle="#1e1f2b";x.fillRect(0,0,W,H);
+
+  x.fillStyle="#3f3f46";x.font="11px system-ui";x.textAlign="center";
+  x.fillText("ROW 1",R1X,BY-30);
+  x.fillText("ROW 2",R2X,BY-30);
+  x.fillText("CENTER AISLE",CX,BY-30);
+
+  x.fillStyle="#1a1b23";x.fillRect(CX-28,BY-40,56,H-BY-30);
+  x.strokeStyle="#27272a";x.lineWidth=1;x.setLineDash([4,4]);x.strokeRect(CX-28,BY-40,56,H-BY-30);x.setLineDash([]);
+
+  x.fillStyle="rgba(59,130,246,0.04)";x.fillRect(70,BY-40,140,H-BY-30);x.strokeStyle="#27272a";x.strokeRect(70,BY-40,140,H-BY-30);
+  x.fillStyle="rgba(59,130,246,0.04)";x.fillRect(310,BY-40,140,H-BY-30);x.strokeRect(310,BY-40,140,H-BY-30);
+
+  x.fillStyle="#3a1515";x.strokeStyle="#ef4444";x.lineWidth=2;x.beginPath();x.roundRect(DIP.x-DIP.w/2,DIP.y-DIP.h/2,DIP.w,DIP.h,6);x.fill();x.stroke();
+  x.fillStyle="#ef4444";x.font="bold 10px system-ui";x.textAlign="center";x.fillText("DIP",DIP.x,DIP.y-4);x.fillText("STATION",DIP.x,DIP.y+8);
+
+  x.fillStyle="#1e3a5f";x.strokeStyle="#3b82f6";x.lineWidth=2;
+  x.beginPath();x.moveTo(CAM.x-35,CAM.y);x.lineTo(CAM.x+35,CAM.y);x.lineTo(CAM.x+20,CAM.y+20);x.lineTo(CAM.x-20,CAM.y+20);x.closePath();x.fill();x.stroke();
+  x.fillStyle="#3b82f6";x.font="bold 10px system-ui";x.textAlign="center";x.fillText("CAMERA",CAM.x,CAM.y+12);
+
+  x.fillStyle="#3b82f630";x.beginPath();x.moveTo(CAM.x-40,CAM.y);x.lineTo(R1X-60,BY-40);x.lineTo(R2X+60,BY-40);x.lineTo(CAM.x+40,CAM.y);x.closePath();x.fill();
+  x.strokeStyle="#3b82f620";x.lineWidth=1;x.stroke();
+
+  cows.forEach(function(c,i){
+    x.fillStyle="#3f3f46";x.beginPath();x.ellipse(c.x,c.y,24,13,0,0,Math.PI*2);x.fill();
+    x.strokeStyle="#52525b";x.lineWidth=1.5;x.stroke();
+    var hd=c.r===1?-1:1;
+    x.fillStyle="#52525b";x.beginPath();x.ellipse(c.x+hd*26,c.y,8,6,0,0,Math.PI*2);x.fill();
+    x.fillStyle="#a1a1aa";x.font="bold 9px system-ui";x.textAlign="center";x.fillText("C"+c.n,c.x,c.y+3);
+  });
+
+  x.fillStyle="#27272a";x.font="10px system-ui";x.textAlign="center";
+  x.fillText("Far end (away from camera)",CX,BY-10);
+  x.fillText("Near end (camera side)",CX,H-55);
+}
+
+function drawP(){
+  var p=paths[cur],cl=COL[cur];
+  x.strokeStyle=cl+"30";x.lineWidth=2;x.setLineDash([6,4]);x.beginPath();x.moveTo(p[0].x,p[0].y);
+  for(var i=1;i<p.length;i++)x.lineTo(p[i].x,p[i].y);x.stroke();x.setLineDash([]);
+
+  var pr=an?af/300:1,pos=gpos(p,pr),ti=Math.floor(pr*(p.length-1));
+  x.strokeStyle=cl;x.lineWidth=3;x.beginPath();x.moveTo(p[0].x,p[0].y);
+  for(var i=1;i<=ti&&i<p.length;i++)x.lineTo(p[i].x,p[i].y);
+  if(ti<p.length-1)x.lineTo(pos.x,pos.y);x.stroke();
+
+  for(var i=0;i<=ti&&i<p.length;i++){
+    x.fillStyle=i===0?"#22c55e":(i===p.length-1?"#ef4444":cl+"80");
+    x.beginPath();x.arc(p[i].x,p[i].y,i===0||i===p.length-1?5:3,0,Math.PI*2);x.fill();
+  }
+
+  x.fillStyle="rgba(0,0,0,0.3)";x.beginPath();x.ellipse(pos.x,pos.y+14,10,4,0,0,Math.PI*2);x.fill();
+  x.fillStyle=cl;x.beginPath();x.arc(pos.x,pos.y,10,0,Math.PI*2);x.fill();
+  x.fillStyle=cl+"cc";x.beginPath();x.arc(pos.x-2,pos.y-2,5,0,Math.PI*2);x.fill();
+}
+
+function render(){draw();drawP();if(an){af+=parseInt(document.getElementById("sp").value);if(af>300)af=0;ai=requestAnimationFrame(render)}}
+function sel(i){cur=i;document.querySelectorAll(".btn").forEach(function(b,j){b.className=j===i?"btn on":"btn"});document.getElementById("inf").textContent=INFO[i];af=0;if(!an)render()}
+function tog(){an=!an;document.getElementById("pb").innerHTML=an?"&#9724; Pause":"&#9654; Play";if(an)render()}
+render();
+</script>
+</body>
+</html>

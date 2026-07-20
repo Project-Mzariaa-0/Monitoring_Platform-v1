@@ -129,8 +129,16 @@ class SessionRunner:
             logger.error("Session %s: cannot acquire hybrid model (already in use by session %s)", self.session_id, manager.active_session_id)
             return
 
+        from src.detection.yolo_detector import YoloDetector
+        from src.ingestion.roi_splitter import split_frame_into_rois
+        from src.state_machine.cow_process_boundary import CowProcessBoundaryDetector
+
+        yolo = YoloDetector(self.weights_path)
+        boundary_detector = CowProcessBoundaryDetector(self.thresholds)
+
         frame_count = 0
         completed_tasks: set[str] = set()
+        task_first_seen: dict[str, str] = {}
 
         try:
             for frame_index, frame in reader.read_frames():
@@ -144,27 +152,48 @@ class SessionRunner:
 
                 loop_start = time.monotonic()
 
+                cow_position = self._detect_cow_position(yolo, frame, self.rois)
+
+                roi_frames = split_frame_into_rois(frame, self.rois)
+                for pos, roi_frame in roi_frames.items():
+                    detections = yolo.detect(roi_frame)
+                    for event in boundary_detector.update(self.session_id, pos, detections):
+                        publisher.publish(build_cow_process_event(event))
+
                 detection = manager.detect(frame)
                 if detection and detection.task_id not in completed_tasks:
                     now = datetime.now(timezone.utc).isoformat()
+                    if detection.task_id not in task_first_seen:
+                        task_first_seen[detection.task_id] = now
+                    start_time = task_first_seen[detection.task_id]
+                    duration = 0
+                    if start_time != now:
+                        try:
+                            t_start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                            t_end = datetime.fromisoformat(now.replace("Z", "+00:00"))
+                            duration = max(0, int((t_end - t_start).total_seconds()))
+                        except (ValueError, TypeError):
+                            duration = 0
                     event = {
                         "session_id": self.session_id,
                         "task_id": detection.task_id,
-                        "cow_position": 1,
+                        "cow_position": cow_position,
                         "status": "completed",
                         "confidence_score": detection.confidence,
-                        "detected_start_time": now,
+                        "detected_start_time": start_time,
                         "detected_end_time": now,
-                        "duration_seconds": 0,
+                        "duration_seconds": duration,
                     }
                     publisher.publish(build_task_event(event))
                     completed_tasks.add(detection.task_id)
                     logger.info(
-                        "Session %s: hybrid detected %s (%s) conf=%.2f [%d/%d tasks]",
+                        "Session %s: hybrid detected %s (%s) conf=%.2f dur=%ds cow=%d [%d/%d tasks]",
                         self.session_id,
                         detection.task_id,
                         detection.task_name,
                         detection.confidence,
+                        duration,
+                        cow_position,
                         len(completed_tasks),
                         6,
                     )
@@ -202,3 +231,21 @@ class SessionRunner:
 
     def stop(self) -> None:
         self.stop_event.set()
+
+    def _detect_cow_position(self, yolo, frame, rois: dict) -> int:
+        from src.ingestion.roi_splitter import split_frame_into_rois
+
+        roi_frames = split_frame_into_rois(frame, rois)
+        person_counts = {}
+        for pos, roi_frame in roi_frames.items():
+            detections = yolo.detect(roi_frame)
+            person_count = sum(1 for d in detections if getattr(d, "class_name", "") == "person")
+            person_counts[pos] = person_count
+
+        if person_counts.get(1, 0) > 0 and person_counts.get(2, 0) == 0:
+            return 1
+        if person_counts.get(2, 0) > 0 and person_counts.get(1, 0) == 0:
+            return 2
+        if person_counts.get(1, 0) > 0 and person_counts.get(2, 0) > 0:
+            return 1 if person_counts[1] >= person_counts[2] else 2
+        return 1

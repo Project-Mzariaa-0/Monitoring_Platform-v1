@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 
-export default function ReportGenerator({ sessionId }: { sessionId: string }) {
+export default function ReportDownloadButton({ sessionId }: { sessionId: string }) {
   const [loading, setLoading] = useState(false);
 
-  async function generateReport() {
+  async function download() {
     setLoading(true);
     try {
       const response = await fetch("/api/reports/generate", {
@@ -16,7 +16,7 @@ export default function ReportGenerator({ sessionId }: { sessionId: string }) {
 
       if (!response.ok) {
         const err = await response.json().catch(() => null);
-        alert(err?.error ?? "Report generation failed");
+        alert(err?.error ?? "Download failed");
         return;
       }
 
@@ -30,15 +30,15 @@ export default function ReportGenerator({ sessionId }: { sessionId: string }) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch {
-      alert("Report generation failed");
+      alert("Download failed");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <button className="button button-primary" type="button" onClick={generateReport} disabled={loading}>
-      {loading ? "Generating..." : "Download Full Report (.docx)"}
+    <button className="button button-secondary" type="button" onClick={download} disabled={loading}>
+      {loading ? "Generating..." : "Download"}
     </button>
   );
 }
