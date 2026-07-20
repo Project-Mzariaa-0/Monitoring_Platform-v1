@@ -94,8 +94,11 @@ class HybridDetector:
             return
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         state_dict = checkpoint.get("model_state_dict", checkpoint)
-        self.lstm.load_state_dict(state_dict)
-        logger.info("Loaded hybrid model weights from %s", path)
+        try:
+            self.lstm.load_state_dict(state_dict)
+            logger.info("Loaded hybrid model weights from %s", path)
+        except RuntimeError as e:
+            logger.warning("Weight shape mismatch (old model vs new architecture), using random init: %s", e)
 
     def detect(self, frame: np.ndarray) -> Optional[HybridDetection]:
         self.frame_count += 1
