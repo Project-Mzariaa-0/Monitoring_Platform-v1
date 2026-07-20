@@ -139,6 +139,8 @@ class SessionRunner:
         frame_count = 0
         completed_tasks: set[str] = set()
         task_first_seen: dict[str, str] = {}
+        task_active_since: dict[str, float] = {}  # task_id -> timestamp when first detected
+        MIN_TASK_DURATION = 10.0  # minimum seconds before marking task as completed
 
         try:
             for frame_index, frame in reader.read_frames():
@@ -162,18 +164,29 @@ class SessionRunner:
 
                 detection = manager.detect(frame)
                 if detection and detection.task_id not in completed_tasks:
-                    now = datetime.now(timezone.utc).isoformat()
+                    now_ts = time.time()
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    
                     if detection.task_id not in task_first_seen:
-                        task_first_seen[detection.task_id] = now
+                        task_first_seen[detection.task_id] = now_iso
+                        task_active_since[detection.task_id] = now_ts
+                        logger.info("Session %s: hybrid first saw %s at frame %d", self.session_id, detection.task_id, frame_count)
+                    
+                    # Check minimum duration before marking as completed
+                    elapsed = now_ts - task_active_since[detection.task_id]
+                    if elapsed < MIN_TASK_DURATION:
+                        # Not enough time passed, skip this detection
+                        frame_count += 1
+                        elapsed_loop = time.monotonic() - loop_start
+                        remaining = FRAME_INTERVAL - elapsed_loop
+                        if remaining > 0:
+                            time.sleep(remaining)
+                        else:
+                            time.sleep(MIN_YIELD_SLEEP)
+                        continue
+                    
                     start_time = task_first_seen[detection.task_id]
-                    duration = 0
-                    if start_time != now:
-                        try:
-                            t_start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                            t_end = datetime.fromisoformat(now.replace("Z", "+00:00"))
-                            duration = max(0, int((t_end - t_start).total_seconds()))
-                        except (ValueError, TypeError):
-                            duration = 0
+                    duration = int(elapsed)
                     event = {
                         "session_id": self.session_id,
                         "task_id": detection.task_id,
@@ -181,13 +194,13 @@ class SessionRunner:
                         "status": "completed",
                         "confidence_score": detection.confidence,
                         "detected_start_time": start_time,
-                        "detected_end_time": now,
+                        "detected_end_time": now_iso,
                         "duration_seconds": duration,
                     }
                     publisher.publish(build_task_event(event))
                     completed_tasks.add(detection.task_id)
                     logger.info(
-                        "Session %s: hybrid detected %s (%s) conf=%.2f dur=%ds cow=%d [%d/%d tasks]",
+                        "Session %s: hybrid COMPLETED %s (%s) conf=%.2f dur=%ds cow=%d [%d/%d tasks]",
                         self.session_id,
                         detection.task_id,
                         detection.task_name,

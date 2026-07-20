@@ -75,6 +75,16 @@ class HybridDetector:
         self.last_detection: Optional[HybridDetection] = None
         self._last_feature: np.ndarray | None = None
 
+        # Temporal smoothing: require N consecutive predictions to agree
+        self._prediction_history: deque[int] = deque(maxlen=10)
+        self._confirmed_task: Optional[int] = None
+        self._confirmed_task_start: float = 0.0
+        self._min_task_duration: float = 5.0  # minimum seconds per task
+
+        # Task transition constraints
+        self._last_task_switch: float = 0.0
+        self._min_switch_interval: float = 3.0  # minimum seconds between task switches
+
         logger.info("HybridDetector initialized: device=%s, weights=%s, seq_len=%d, yolo_skip=%d", self.device, weights_path, sequence_length, yolo_skip)
 
     def _load_weights(self, weights_path: str) -> None:
@@ -120,13 +130,50 @@ class HybridDetector:
                 logger.info("Hybrid: frame %d below threshold (%.3f < %.3f) top3=[%s]", self.frame_count, confidence, self.threshold, ", ".join(parts))
             return None
 
+        # Temporal smoothing: track prediction history
+        self._prediction_history.append(predicted_idx)
+        
+        # Count consecutive predictions for each task
+        if len(self._prediction_history) < 5:
+            return None  # need at least 5 predictions to confirm
+        
+        # Count occurrences of predicted_idx in recent history
+        recent = list(self._prediction_history)[-5:]
+        count = recent.count(predicted_idx)
+        
+        # Require at least 4 out of 5 recent predictions to agree
+        if count < 4:
+            if self.frame_count % 30 == 0:
+                logger.info("Hybrid: frame %d prediction %d not consistent enough (%d/5)", self.frame_count, predicted_idx, count)
+            return None
+        
+        now = time.time()
+        
+        # Check if we're switching tasks
+        if self._confirmed_task is not None and predicted_idx != self._confirmed_task:
+            # Check minimum switch interval
+            if now - self._last_task_switch < self._min_switch_interval:
+                return None  # too soon to switch
+            
+            # Check minimum duration for current task
+            if now - self._confirmed_task_start < self._min_task_duration:
+                logger.info("Hybrid: keeping task %d (too soon to switch, %.1fs < %.1fs)",
+                           self._confirmed_task, now - self._confirmed_task_start, self._min_task_duration)
+                return None  # keep current task
+        
+        # Confirm new task
+        if predicted_idx != self._confirmed_task:
+            self._confirmed_task = predicted_idx
+            self._confirmed_task_start = now
+            self._last_task_switch = now
+            logger.info("Hybrid: CONFIRMED task switch to %s at frame %d", TASK_LABELS[predicted_idx], self.frame_count)
+        
         detection = HybridDetection(
             task_id=TASK_LABELS[predicted_idx],
             task_name=TASK_NAMES[predicted_idx],
             confidence=confidence,
         )
         self.last_detection = detection
-        logger.info("Hybrid: DETECTED %s (%s) conf=%.3f at frame %d", detection.task_id, detection.task_name, confidence, self.frame_count)
         return detection
 
     def reset(self) -> None:
@@ -134,3 +181,7 @@ class HybridDetector:
         self.frame_count = 0
         self.last_detection = None
         self._last_feature = None
+        self._prediction_history.clear()
+        self._confirmed_task = None
+        self._confirmed_task_start = 0.0
+        self._last_task_switch = 0.0
