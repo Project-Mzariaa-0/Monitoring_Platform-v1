@@ -25,8 +25,8 @@ class YOLOConfig:
 @dataclass
 class LSTMConfig:
     """LSTM model configuration."""
-    input_size: int = 512  # YOLO feature dimension
-    hidden_size: int = 64
+    input_size: int = 640  # Multimodal: pose(512) + objects(128)
+    hidden_size: int = 128
     num_layers: int = 1
     bidirectional: bool = False
     dropout: float = 0.7

@@ -16,7 +16,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from config import load_config, ModelConfig
-from detection.pose_feature_extractor import PoseFeatureExtractor
+from detection.multimodal_feature_extractor import MultimodalFeatureExtractor
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -107,17 +107,17 @@ def step1_extract_frames(raw_dir: str, output_dir: str, target_fps: int = 5):
 
 
 def step2_extract_features(config: ModelConfig, frames_dir: str, features_dir: str, seq_len: int = 30):
-    """Extract motion-aware sequence features from all frames.
+    """Extract multimodal sequence features from all frames.
 
-    Processes frames in chunks of `seq_len` and computes motion features
-    (optical flow, person displacement, temporal stats) between consecutive frames.
-    Each clip produces one (seq_len, 512) sequence.
+    Runs both YOLOv8-Pose (512-dim) and YOLOv8n (128-dim) on each frame,
+    producing a combined 640-dim feature vector per frame.
+    Each clip produces one (seq_len, 640) sequence.
     """
     logger.info("=" * 60)
-    logger.info("STEP 2: Extracting motion-aware sequence features (512-dim)")
+    logger.info("STEP 2: Extracting multimodal features (pose 512 + objects 128 = 640 dims)")
     logger.info("=" * 60)
 
-    detector = PoseFeatureExtractor(config)
+    detector = MultimodalFeatureExtractor(config)
     frames_path = Path(frames_dir)
     features_path = Path(features_dir)
     features_path.mkdir(parents=True, exist_ok=True)
@@ -163,7 +163,7 @@ def step2_extract_features(config: ModelConfig, frames_dir: str, features_dir: s
 
             # Pad shorter sequences to seq_len
             if len(seq_features) < seq_len:
-                pad = np.zeros((seq_len - len(seq_features), 512))
+                pad = np.zeros((seq_len - len(seq_features), 640))
                 seq_features = np.concatenate([seq_features, pad], axis=0)
 
             sequences.append(seq_features)

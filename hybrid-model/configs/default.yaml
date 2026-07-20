@@ -11,8 +11,8 @@ model:
   
   # LSTM settings
   lstm:
-    input_size: 512
-    hidden_size: 64
+    input_size: 640
+    hidden_size: 128
     num_layers: 1
     bidirectional: false
     dropout: 0.7

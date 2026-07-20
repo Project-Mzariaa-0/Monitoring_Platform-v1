@@ -46,22 +46,22 @@ class HybridDetector:
             weights_path = str(HYBRID_MODEL_DIR / "models" / "checkpoints" / "best_model.pt")
 
         from config import ModelConfig
-        from detection.pose_feature_extractor import PoseFeatureExtractor
+        from detection.multimodal_feature_extractor import MultimodalFeatureExtractor
         from temporal.lstm_model import MilkingActionLSTM
 
         config = ModelConfig()
-        config.lstm.input_size = 512
-        config.lstm.hidden_size = 64
+        config.lstm.input_size = 640
+        config.lstm.hidden_size = 128
         config.lstm.num_layers = 1
         config.lstm.bidirectional = False
         config.lstm.num_classes = 6
         config.lstm.dropout = 0.7
 
-        self.yolo = PoseFeatureExtractor(config)
+        self.yolo = MultimodalFeatureExtractor(config)
 
         self.lstm = MilkingActionLSTM(
-            input_size=512,
-            hidden_size=64,
+            input_size=640,
+            hidden_size=128,
             num_layers=1,
             num_classes=6,
             dropout=0.7,

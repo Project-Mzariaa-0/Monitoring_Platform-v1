@@ -16,8 +16,8 @@ class MilkingActionLSTM(nn.Module):
 
     def __init__(
         self,
-        input_size: int = 512,
-        hidden_size: int = 64,
+        input_size: int = 640,
+        hidden_size: int = 128,
         num_layers: int = 1,
         num_classes: int = 6,
         dropout: float = 0.5,
