@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -15,7 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from src.runtime.session_runner import SessionRunner
+from src.runtime.session_runner import SessionRunner, _parse_end_time
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,6 +36,23 @@ app.add_middleware(
 active_runners: dict[str, SessionRunner] = {}
 active_threads: dict[str, threading.Thread] = {}
 _runner_lock = threading.Lock()
+
+
+def _deadline_watchdog() -> None:
+    """Background thread: every 30s, force-stop any runner past its deadline."""
+    while True:
+        time.sleep(30)
+        now = datetime.now(timezone.utc)
+        with _runner_lock:
+            for sid, runner in list(active_runners.items()):
+                deadline = _parse_end_time(runner.end_time)
+                if deadline and now >= deadline:
+                    logger.warning("Watchdog: session %s past deadline %s, force-stopping", sid, deadline.isoformat())
+                    runner.stop()
+                    _mark_session_completed(sid)
+                    active_runners.pop(sid, None)
+                    t = active_threads.pop(sid, None)
+                    logger.info("Watchdog: session %s removed from active runners", sid)
 
 WEB_APP_URL = os.getenv("WEB_APP_URL", "http://localhost:3000")
 
@@ -180,7 +199,10 @@ def _start_session_runner(session_id: str, start_time: str, end_time: str) -> No
 
 @app.on_event("startup")
 def startup_tasks() -> None:
-    """Pre-load hybrid model and discover scheduled sessions."""
+    """Pre-load hybrid model, start deadline watchdog, and discover scheduled sessions."""
+    threading.Thread(target=_deadline_watchdog, daemon=True).start()
+    logger.info("Deadline watchdog started (checks every 30s)")
+
     use_hybrid = os.getenv("USE_HYBRID_MODEL", "false").lower() in ("true", "1", "yes")
     if use_hybrid:
         from src.detection.hybrid_model_manager import get_hybrid_manager
