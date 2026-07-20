@@ -16,9 +16,7 @@ class RtspReader:
 
     def _open_fallback(self):
         if self.fallback_video_path and Path(self.fallback_video_path).exists():
-            logger.warning(
-                "Falling back to video: %s", self.fallback_video_path,
-            )
+            logger.warning("Falling back to video: %s", self.fallback_video_path)
             capture = cv2.VideoCapture(self.fallback_video_path)
             if capture.isOpened():
                 return capture
@@ -28,10 +26,8 @@ class RtspReader:
         capture = cv2.VideoCapture(self.stream_url)
 
         if capture.isOpened():
-            # Try one test read — RTSP may isOpened() but block for 30s on read()
             success, test_frame = capture.read()
             if success:
-                # RTSP works — yield the test frame then continue
                 frame_index = 0
                 yield frame_index, test_frame
                 frame_index = 1
@@ -53,17 +49,23 @@ class RtspReader:
         else:
             capture.release()
 
-        # Fallback to video file
         fallback = self._open_fallback()
         if fallback is None:
-            raise RuntimeError(f"Unable to open RTSP stream or fallback video")
+            raise RuntimeError("Unable to open RTSP stream or fallback video")
+
+        total_frames = int(fallback.get(cv2.CAP_PROP_FRAME_COUNT))
+        logger.info("Fallback video: %d frames, looping until session ends", total_frames)
 
         frame_index = 0
         try:
             while True:
                 success, frame = fallback.read()
                 if not success:
-                    break
+                    # Video ended — loop back to start
+                    fallback.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    success, frame = fallback.read()
+                    if not success:
+                        break
                 yield frame_index, frame
                 frame_index += 1
                 if limit is not None and frame_index >= limit:
