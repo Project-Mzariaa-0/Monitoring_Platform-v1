@@ -39,20 +39,31 @@ _runner_lock = threading.Lock()
 
 
 def _deadline_watchdog() -> None:
-    """Background thread: every 30s, force-stop any runner past its deadline."""
+    """Background thread: every 10s, force-stop any runner past its deadline."""
     while True:
-        time.sleep(30)
+        time.sleep(10)
         now = datetime.now(timezone.utc)
-        with _runner_lock:
-            for sid, runner in list(active_runners.items()):
-                deadline = _parse_end_time(runner.end_time)
-                if deadline and now >= deadline:
-                    logger.warning("Watchdog: session %s past deadline %s, force-stopping", sid, deadline.isoformat())
-                    runner.stop()
-                    _mark_session_completed(sid)
-                    active_runners.pop(sid, None)
-                    t = active_threads.pop(sid, None)
-                    logger.info("Watchdog: session %s removed from active runners", sid)
+        to_stop: list[str] = []
+        try:
+            with _runner_lock:
+                for sid, runner in list(active_runners.items()):
+                    deadline = _parse_end_time(runner.end_time)
+                    if deadline and now >= deadline:
+                        logger.warning("Watchdog: session %s past deadline %s, force-stopping", sid, deadline.isoformat())
+                        runner.stop()
+                        to_stop.append(sid)
+        except Exception:
+            logger.exception("Watchdog: error checking deadlines")
+
+        for sid in to_stop:
+            try:
+                _mark_session_completed(sid)
+            except Exception:
+                logger.exception("Watchdog: failed to mark session %s completed", sid)
+            with _runner_lock:
+                active_runners.pop(sid, None)
+                active_threads.pop(sid, None)
+            logger.info("Watchdog: session %s removed from active runners", sid)
 
 WEB_APP_URL = os.getenv("WEB_APP_URL", "http://localhost:3000")
 
