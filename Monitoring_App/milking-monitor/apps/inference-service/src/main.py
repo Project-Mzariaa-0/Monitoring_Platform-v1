@@ -212,7 +212,7 @@ def _start_session_runner(session_id: str, start_time: str, end_time: str) -> No
 def startup_tasks() -> None:
     """Pre-load hybrid model, start deadline watchdog, and discover scheduled sessions."""
     threading.Thread(target=_deadline_watchdog, daemon=True).start()
-    logger.info("Deadline watchdog started (checks every 30s)")
+    logger.info("Deadline watchdog started (checks every 10s)")
 
     use_hybrid = os.getenv("USE_HYBRID_MODEL", "false").lower() in ("true", "1", "yes")
     if use_hybrid:

@@ -34,8 +34,8 @@ export default function MultiStepSessionForm() {
       body: JSON.stringify({
         supervisor_id: supervisorEmail || "anonymous",
         employee_id: employeeName || "unassigned",
-        scheduled_start_time: scheduledStartTime || new Date().toISOString(),
-        estimated_end_time: estimatedEndTime || new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        scheduled_start_time: scheduledStartTime ? new Date(scheduledStartTime).toISOString() : new Date().toISOString(),
+        estimated_end_time: estimatedEndTime ? new Date(estimatedEndTime).toISOString() : new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         employee_name: employeeName,
         supervisor_name: supervisorName,
         supervisor_email: supervisorEmail,

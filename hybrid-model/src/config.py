@@ -26,10 +26,10 @@ class YOLOConfig:
 class LSTMConfig:
     """LSTM model configuration."""
     input_size: int = 640  # Multimodal: pose(512) + objects(128)
-    hidden_size: int = 128
-    num_layers: int = 1
-    bidirectional: bool = False
-    dropout: float = 0.7
+    hidden_size: int = 256
+    num_layers: int = 2
+    bidirectional: bool = True
+    dropout: float = 0.3
     sequence_length: int = 30  # frames (6 seconds at 5 FPS)
     num_classes: int = 6  # milking tasks
     
@@ -47,9 +47,9 @@ class LSTMConfig:
 @dataclass
 class TrainingConfig:
     """Training configuration."""
-    epochs: int = 100
-    batch_size: int = 32
-    learning_rate: float = 0.001
+    epochs: int = 200
+    batch_size: int = 16
+    learning_rate: float = 0.0005
     weight_decay: float = 0.0001
     
     # Optimizer
@@ -63,7 +63,7 @@ class TrainingConfig:
     
     # Early stopping
     early_stopping_enabled: bool = True
-    early_stopping_patience: int = 10
+    early_stopping_patience: int = 25
     early_stopping_min_delta: float = 0.001
 
 

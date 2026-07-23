@@ -1,161 +1,237 @@
 # Hybrid YOLO + LSTM Milking Detection Model
 
-Real-time milking task detection using YOLO for object detection and LSTM for temporal action recognition.
+Real-time milking task detection using multimodal feature extraction (YOLOv8-Pose + YOLOv8n) and LSTM for temporal action recognition.
 
 ## Architecture
 
 ```
-Frame Sequence (30 frames @ 5 FPS = 6 seconds)
+Frame (1248x576)
     │
-    ▼
-┌─────────────────────────────────────┐
-│         YOLOv8n (Per Frame)         │
-│  - Detects: person, objects         │
-│  - Extracts: bounding boxes         │
-│  - Speed: 20ms/frame                │
-└─────────────┬───────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────┐
-│      Feature Aggregator             │
-│  - Combines 30 frames of YOLO data  │
-│  - Adds motion vectors              │
-│  - Normalizes positions             │
-└─────────────┬───────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────┐
-│         LSTM (Temporal)             │
-│  - Analyzes sequence pattern        │
-│  - Classifies action                │
-│  - Predicts completion              │
-└─────────────┬───────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────┐
-│         State Machine               │
-│  - Maps actions to tasks            │
-│  - Tracks progress                  │
-└─────────────────────────────────────┘
+    ├────────────────────────────┐
+    ▼                            ▼
+┌──────────────────┐    ┌──────────────────┐
+│  YOLOv8-Pose     │    │  YOLOv8n         │
+│  (yolov8n-pose)  │    │  (yolov8n)       │
+│  17 keypoints    │    │  80 COCO classes │
+└────────┬─────────┘    └────────┬─────────┘
+         │                       │
+         ▼                       ▼
+┌──────────────────┐    ┌──────────────────┐
+│  Pose Features   │    │  Object Features │
+│  (512 dims)      │    │  (128 dims)      │
+│  · person detect │    │  · class counts  │
+│  · arm pose      │    │  · confidence    │
+│  · row position  │    │  · bbox stats    │
+│  · keypoints     │    │  · spatial grid  │
+│  · motion        │    │  · temporal      │
+│  · action        │    │  · proximity     │
+│  · visual        │    │                  │
+└────────┬─────────┘    └────────┬─────────┘
+         │                       │
+         └───────────┬───────────┘
+                     ▼
+            ┌─────────────────┐
+            │  Concatenate    │
+            │  (640 dims)     │
+            └────────┬────────┘
+                     │
+                     ▼
+            ┌─────────────────┐
+            │  LSTM Model     │
+            │  (30 frames)    │
+            └────────┬────────┘
+                     │
+                     ▼
+            ┌─────────────────┐
+            │  Task Classes   │
+            │  6 milking      │
+            │  tasks          │
+            └─────────────────┘
 ```
 
-## Quick Start
+## Documentation
 
-### 1. Install Dependencies
+See the [`doc/`](doc/) folder for detailed guides:
+
+| Guide | Description |
+|-------|-------------|
+| [ROBOFLOW_IMPORT.md](doc/ROBOFLOW_IMPORT.md) | Import annotated data from Roboflow |
+| [TRAINING.md](doc/TRAINING.md) | How to train the model |
+| [ARCHITECTURE.md](doc/ARCHITECTURE.md) | Model architecture details |
+| [DATA_COLLECTION.md](doc/DATA_COLLECTION.md) | How to collect training data |
+
+## Quick Start
 
 ```bash
 cd hybrid-model
 pip install -r requirements.txt
+
+# Extract frames from video clips
+python add_clip.py
+
+# Train (full pipeline)
+python run_pipeline.py --skip-frames --seq-length 30 --epochs 200
+
+# Copy weights to inference service
+python -c "import shutil; shutil.copy('models/checkpoints/best_model.pt', '../Monitoring_App/milking-monitor/apps/inference-service/models/checkpoints/best_model.pt')"
 ```
 
-### 2. Prepare Dataset
+## Model Details
 
-```bash
-# Organize your video clips
-python src/data/organize_dataset.py --input /path/to/videos --output data/raw
+### Feature Extraction (640 dims per frame)
 
-# Extract frames and annotations
-python src/data/extract_frames.py --input data/raw --output data/processed
+**Pose Features (512 dims)** — YOLOv8-Pose with 17 COCO keypoints:
+
+| Section | Dims | Description |
+|---------|------|-------------|
+| Person detection | 0-49 | Count, positions, spatial info |
+| Arm pose | 50-99 | Arm raise detection, arm angles, working posture |
+| Row position | 100-149 | Left/right cow row, dip station, movement history |
+| Keypoint positions | 150-199 | All 17 normalized keypoints, arm angles |
+| Motion | 200-249 | Displacement, speed, direction between frames |
+| Temporal stats | 250-299 | Running averages, std dev over 30 frames |
+| Action features | 300-349 | Walking vs working, bending, dip station proximity |
+| Visual features | 350-511 | Brightness, contrast, person region size |
+
+**Object Features (128 dims)** — YOLOv8n on 80 COCO classes:
+
+| Section | Dims | Description |
+|---------|------|-------------|
+| Per-class detection | 0-48 | Count, confidence, binary, bbox center/size |
+| Aggregate stats | 49-58 | Total objects, person/non-person ratio |
+| Spatial grid | 59-70 | 3x3 grid distribution |
+| Temporal stats | 71-82 | Running mean, std, delta over 30 frames |
+| Object-person proximity | 86-127 | Distance to nearest object, nearby count |
+
+### Arm Detection (High Camera Angle)
+
+Camera looks down from wall. "Arm extended" means wrist below shoulder in image coords (forward toward cow):
+
+```python
+forward = wrist.y > shoulder.y + threshold  # arm extended forward
+away = abs(wrist.x - body_center.x) > person_height * 0.15  # arm away from body
+arm_raised = forward and away
 ```
 
-### 3. Train Model
+### Row Detection
 
-```bash
-# Train LSTM model
-python src/train.py --epochs 100 --batch-size 32
+| Position | x_ratio | Description |
+|----------|---------|-------------|
+| Left row | < 0.4 | Cow row left of center |
+| Center | 0.4 - 0.6 | Aisle between rows |
+| Right row | > 0.6 | Cow row right of center |
+| Dip station | > 0.75, y > 0.7 | Bottom-right corner |
 
-# Evaluate
-python src/evaluate.py --model models/best.pt
+### LSTM Temporal Model
+
+```
+input(640) → Linear(64) → ReLU → Dropout(0.3)
+    → LSTM(64, 256, 2 layers, bidirectional)
+    → Attention(512 → 32 → 1) → weighted sum
+    → Linear(512 → 32) → ReLU → Dropout(0.3) → Linear(32 → 6)
 ```
 
-### 4. Run Inference
+| Parameter | Value |
+|-----------|-------|
+| Input size | 640 |
+| Hidden size | 256 |
+| Layers | 2 (bidirectional) |
+| Dropout | 0.3 |
+| Attention | Self-attention pooling |
+| Parameters | 2,310,503 |
+| Model size | 9.2 MB |
 
-```bash
-# Real-time detection
-python src/inference.py --source rtsp://camera-ip/stream
+### Supported Tasks
 
-# Test on video file
-python src/inference.py --source test_video.mp4
-```
+| Task | Name | Description | Visual Signal |
+|------|------|-------------|---------------|
+| TASK-01 | Pre-cleaning | Spray water on udder | Person holds pipe, arms raised |
+| TASK-02 | Stripping | Strip foremilk by hand | Person hand on udder |
+| TASK-03 | Machine attachment | Attach milking cups | Person crouching at cow |
+| TASK-04 | Milking | Cups attached, milking | Cups on udder, person walking |
+| TASK-05 | Detachment | Remove milking cups | Cups dangling in holder |
+| TASK-06 | Post-dip | Apply iodine dip | Person at dip station, dips cup |
+
+## Training
+
+### Dataset
+
+- **Frames**: 4,775 extracted across 6 task folders
+- **Sequences**: 161 (30 frames each @ 5 FPS = 6 seconds)
+- **Augmentation**: 8x (horizontal flip, rotation ±15°, brightness/contrast ±20%)
+- **Splits**: 127 train / 34 val (80/20)
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| Best val accuracy | **73.53%** |
+| Best epoch | 37 |
+| Early stopped | Epoch 62 (patience 25) |
+| Train accuracy | 90.46% |
+| Model size | 9.2 MB |
+
+### 5-Fold Cross-Validation (previous run)
+
+| Fold | Val Accuracy |
+|------|-------------|
+| 1 | 65.62% |
+| 2 | 52.94% |
+| 3 | 58.82% |
+| 4 | 55.88% |
+| 5 | 61.76% |
+| **Mean** | **58.67% ± 6.53%** |
 
 ## Project Structure
 
 ```
 hybrid-model/
+├── doc/                                     # Documentation
+│   ├── README.md                            # Documentation index
+│   ├── ROBOFLOW_IMPORT.md                   # Roboflow import guide
+│   ├── TRAINING.md                          # Training guide
+│   ├── ARCHITECTURE.md                      # Architecture details
+│   └── DATA_COLLECTION.md                   # Data collection guide
 ├── src/
-│   ├── __init__.py
-│   ├── config.py              # Configuration
+│   ├── config.py                          # Model configuration
 │   ├── detection/
-│   │   ├── __init__.py
-│   │   ├── yolo_detector.py   # YOLO feature extractor
-│   │   └── feature_extractor.py
+│   │   ├── multimodal_feature_extractor.py  # Combined pose + object features
+│   │   ├── pose_feature_extractor.py      # YOLOv8-Pose (512 dims)
+│   │   └── object_feature_extractor.py    # YOLOv8n (128 dims)
 │   ├── temporal/
-│   │   ├── __init__.py
-│   │   ├── lstm_model.py      # LSTM model
-│   │   └── sequence_dataset.py
-│   ├── training/
-│   │   ├── __init__.py
-│   │   ├── train.py           # Training loop
-│   │   └── evaluate.py        # Evaluation metrics
-│   ├── inference/
-│   │   ├── __init__.py
-│   │   └── hybrid_detector.py # Combined detector
-│   ├── data/
-│   │   ├── __init__.py
-│   │   ├── organize_dataset.py
-│   │   └── extract_frames.py
-│   └── utils/
-│       ├── __init__.py
-│       ├── visualization.py
-│       └── metrics.py
+│   │   └── lstm_model.py                  # LSTM with attention
+│   └── training/
+│       ├── augmentation.py                # 8x data augmentation
+│       └── train.py                       # Training loop
 ├── configs/
-│   └── default.yaml           # Default config
+│   └── default.yaml                       # All hyperparameters
+├── models/
+│   └── checkpoints/
+│       └── best_model.pt                  # Trained weights (9.2 MB)
 ├── data/
-│   ├── raw/                   # Raw video clips
-│   ├── processed/             # Extracted frames
-│   └── splits/                # Train/val/test splits
-├── models/                    # Saved models
-├── notebooks/                 # Jupyter notebooks
-├── tests/                     # Unit tests
-├── requirements.txt
-├── setup.py
-└── README.md
+│   ├── frames/                            # 4,775 extracted frames
+│   └── raw/                               # Original video clips
+├── run_pipeline.py                        # Full training pipeline
+├── train_yolo_custom.py                   # Custom YOLO training
+├── import_roboflow.py                     # Roboflow import script
+├── semi_auto_labeler.py                   # Annotation tool
+├── add_clip.py                            # Frame extraction
+└── requirements.txt
 ```
 
-## Model Details
+## Inference Service Integration
 
-### YOLO Feature Extractor
-- **Model**: YOLOv8n (COCO pretrained)
-- **Output**: 256-dim feature vector per frame
-- **Speed**: ~20ms/frame on CPU
+```python
+# inference-service/src/detection/hybrid_detector.py
+from detection.multimodal_feature_extractor import MultimodalFeatureExtractor
 
-### LSTM Temporal Model
-- **Input**: 30-frame sequence (6 seconds)
-- **Hidden size**: 256
-- **Layers**: 2 (bidirectional)
-- **Output**: 6 task probabilities
+extractor = MultimodalFeatureExtractor(config)  # runs YOLOv8-Pose + YOLOv8n
+features = extractor.extract_features(frame)    # 640-dim vector
+```
 
-### Supported Tasks
-| Task | Description |
-|------|-------------|
-| TASK-01 | Pre-cleaning |
-| TASK-02 | Stripping |
-| TASK-03 | Machine attachment |
-| TASK-04 | Milking (active) |
-| TASK-05 | Detachment |
-| TASK-06 | Post-dip |
-
-## Dataset Requirements
-
-- **Video clips**: 5-10 seconds each
-- **Annotations**: Start/end times for each task
-- **Quantity**: ~50 clips per task (300 total minimum)
-- **Format**: MP4, 1920x1080 or higher
-
-## Performance
-
-| Metric | Target |
-|--------|--------|
-| FPS | 4+ |
-| Accuracy | >85% |
-| Latency | <500ms |
+The inference service:
+- Runs both YOLO models per frame (~0.24s)
+- Buffers 30 frames, then runs LSTM inference
+- Uses temporal smoothing (3/5 consecutive predictions)
+- Detects task switches with 5s minimum per task
+- Publishes task events to the web app via HTTP

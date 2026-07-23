@@ -1,7 +1,0 @@
-data/raw_clips/
-data/ground_truth/
-models/
-results/*.json
-results/*.csv
-__pycache__/
-.venv/

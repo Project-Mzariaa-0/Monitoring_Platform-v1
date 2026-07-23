@@ -137,7 +137,7 @@ class SessionRunner:
         boundary_detector = CowProcessBoundaryDetector(self.thresholds)
 
         frame_count = 0
-        COMPLETION_THRESHOLD = 0.50  # 50% ratio required to mark task as completed
+        COMPLETION_THRESHOLD = 0.10  # 10% of total frames (tasks happen sequentially)
 
         # Collect all predictions: task_id -> list of (timestamp, confidence)
         task_predictions: dict[str, list[tuple[str, float]]] = {
@@ -146,6 +146,8 @@ class SessionRunner:
         }
         # Track frame-level predictions: what was detected on each frame
         frame_log: list[dict] = []
+        # Track cow process boundaries based on hybrid task detections
+        cow_process_started: dict[int, bool] = {1: False, 2: False}
 
         try:
             for frame_index, frame in reader.read_frames():
@@ -183,6 +185,32 @@ class SessionRunner:
                     if frame_count % 30 == 0:
                         logger.info("Session %s: frame %d detected %s (%.2f)", self.session_id, frame_count, detection.task_id, detection.confidence)
 
+                    # Drive cow process boundaries from task detections
+                    if detection.task_id == "TASK-03" and not cow_process_started.get(cow_position, False):
+                        cow_process_started[cow_position] = True
+                        cow_event = {
+                            "session_id": self.session_id,
+                            "cow_position": cow_position,
+                            "event_type": "started",
+                            "detected_time": now_iso,
+                        }
+                        try:
+                            publisher.publish(build_cow_process_event(cow_event))
+                        except Exception:
+                            pass
+                    elif detection.task_id == "TASK-05" and cow_process_started.get(cow_position, False):
+                        cow_process_started[cow_position] = False
+                        cow_event = {
+                            "session_id": self.session_id,
+                            "cow_position": cow_position,
+                            "event_type": "completed",
+                            "detected_time": now_iso,
+                        }
+                        try:
+                            publisher.publish(build_cow_process_event(cow_event))
+                        except Exception:
+                            pass
+
                 frame_count += 1
                 if frame_count % 100 == 0:
                     logger.info("Session %s: processed %d frames", self.session_id, frame_count)
@@ -208,8 +236,20 @@ class SessionRunner:
 
         for task_id, predictions in task_predictions.items():
             if not predictions:
-                # Task never detected at all
+                # Task never detected at all — publish missed event so it shows in web app
                 missed_tasks.add(task_id)
+                now = datetime.now(timezone.utc).isoformat()
+                event = {
+                    "session_id": self.session_id,
+                    "task_id": task_id,
+                    "cow_position": 1,
+                    "status": "missed",
+                    "confidence_score": 0.0,
+                    "detected_start_time": now,
+                    "detected_end_time": now,
+                    "duration_seconds": 0,
+                }
+                publisher.publish(build_task_event(event))
                 logger.info("Session %s: %s NEVER DETECTED -> missed", self.session_id, task_id)
                 continue
 
@@ -250,7 +290,7 @@ class SessionRunner:
                 }
                 publisher.publish(build_task_event(event))
                 logger.info(
-                    "Session %s: %s COMPLETED (%.1f%% >= 70%%) avg_conf=%.2f dur=%ds",
+                    "Session %s: %s COMPLETED (%.1f%% >= 18%%) avg_conf=%.2f dur=%ds",
                     self.session_id, task_id, ratio * 100, avg_confidence, duration,
                 )
             else:
@@ -269,7 +309,7 @@ class SessionRunner:
                 }
                 publisher.publish(build_task_event(event))
                 logger.info(
-                    "Session %s: %s MISSED (%.1f%% < 70%% threshold)",
+                    "Session %s: %s MISSED (%.1f%% < 18%% threshold)",
                     self.session_id, task_id, ratio * 100,
                 )
 

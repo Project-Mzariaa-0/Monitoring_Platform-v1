@@ -51,21 +51,21 @@ class HybridDetector:
 
         config = ModelConfig()
         config.lstm.input_size = 640
-        config.lstm.hidden_size = 128
-        config.lstm.num_layers = 1
-        config.lstm.bidirectional = False
+        config.lstm.hidden_size = 256
+        config.lstm.num_layers = 2
+        config.lstm.bidirectional = True
         config.lstm.num_classes = 6
-        config.lstm.dropout = 0.7
+        config.lstm.dropout = 0.3
 
         self.yolo = MultimodalFeatureExtractor(config)
 
         self.lstm = MilkingActionLSTM(
             input_size=640,
-            hidden_size=128,
-            num_layers=1,
+            hidden_size=256,
+            num_layers=2,
             num_classes=6,
-            dropout=0.7,
-            bidirectional=False,
+            dropout=0.3,
+            bidirectional=True,
         ).to(self.device)
 
         self._load_weights(weights_path)
@@ -144,8 +144,8 @@ class HybridDetector:
         recent = list(self._prediction_history)[-5:]
         count = recent.count(predicted_idx)
         
-        # Require at least 4 out of 5 recent predictions to agree
-        if count < 4:
+        # Require at least 3 out of 5 recent predictions to agree
+        if count < 3:
             if self.frame_count % 30 == 0:
                 logger.info("Hybrid: frame %d prediction %d not consistent enough (%d/5)", self.frame_count, predicted_idx, count)
             return None

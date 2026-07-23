@@ -12,10 +12,10 @@ model:
   # LSTM settings
   lstm:
     input_size: 640
-    hidden_size: 128
-    num_layers: 1
-    bidirectional: false
-    dropout: 0.7
+    hidden_size: 256
+    num_layers: 2
+    bidirectional: true
+    dropout: 0.3
     sequence_length: 30
     num_classes: 6
 
@@ -59,9 +59,9 @@ domain:
 # Training configuration
 training:
   # General
-  epochs: 100
-  batch_size: 32
-  learning_rate: 0.001
+  epochs: 200
+  batch_size: 16
+  learning_rate: 0.0005
   weight_decay: 0.0001
   
   # Optimizer
@@ -85,7 +85,7 @@ training:
   # Early stopping
   early_stopping:
     enabled: true
-    patience: 10
+    patience: 25
     min_delta: 0.001
 
 # Data configuration
