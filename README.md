@@ -1,72 +1,124 @@
 <div align="center">
 
-# 🐄 Milking Monitor
+# Milking Monitor
 
 **Real-time compliance monitoring platform for dairy farming operations**
 
-Computer vision from RTSP camera streams + a Next.js web interface for continuous monitoring and compliance tracking.
+Computer vision (YOLO + LSTM) from RTSP camera streams + a Next.js web interface for continuous monitoring and compliance tracking.
 
 ![Python](https://img.shields.io/badge/Python-3.8+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-inference-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-frontend-000000?style=flat-square&logo=next.js&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-database-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-model-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)
 ![License](https://img.shields.io/badge/license-Commercial-red?style=flat-square)
 
 </div>
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [Project Structure](#-project-structure)
-- [Quick Start](#-quick-start)
-- [API Endpoints](#-api-endpoints)
-- [Business Logic](#-business-logic)
-- [Configuration](#-configuration)
-- [Real-Time Event Flow](#-real-time-event-flow)
-- [Dashboard Features](#-dashboard-features)
-- [Security & Authentication](#-security--authentication)
-- [Development & Testing](#-development--testing)
-- [Deployment](#-deployment)
-- [Troubleshooting](#-troubleshooting)
-- [Roadmap](#-roadmap)
-- [Contact](#-contact)
-- [License](#-license)
+- [Project Overview](#project-overview)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [AI Model Architecture](#ai-model-architecture)
+- [API Endpoints](#api-endpoints)
+- [Business Logic](#business-logic)
+- [Real-Time Event Flow](#real-time-event-flow)
+- [Dashboard Features](#dashboard-features)
+- [Security & Authentication](#security--authentication)
+- [Development & Testing](#development--testing)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
+- [License](#license)
 
 ---
 
-## 📁 Project Structure
+## Project Overview
+
+A cooperative dairy milking compliance monitoring platform that:
+
+1. **Detects milking tasks** in real-time using a multimodal AI model (YOLOv8-Pose + YOLOv8n + LSTM)
+2. **Tracks compliance** against the 6-step milking protocol
+3. **Streams live data** to a web dashboard via Server-Sent Events
+4. **Generates reports** (PDF/DOCX) for compliance auditing
+
+### Key Features
+
+- **Multimodal AI**: Pose estimation + object detection + temporal LSTM for task recognition
+- **Live Dashboard**: Real-time task status, compliance scores, and session management
+- **Cooperative Design**: Multi-organization support with role-based access
+- **CI/CD**: Automated testing and deployment via GitHub Actions
+- **Camera Integration**: RTSP streaming via go2rtc with WebRTC support
+
+---
+
+## Project Structure
 
 ```
-Milking Monitor
-├── apps/
-│   ├── inference-service/          # Python FastAPI backend
+Monitoring_Platform-v1/
+├── Monitoring_App/milking-monitor/apps/
+│   ├── inference-service/              # Python FastAPI backend
 │   │   ├── src/
-│   │   │   ├── main.py             # FastAPI application
-│   │   │   ├── events/             # Event handling
-│   │   │   ├── runtime/            # Session management
-│   │   │   ├── ingestion/          # Video stream processing
-│   │   │   ├── detection/          # YOLO detection
-│   │   │   └── state_machine/      # Business logic
-│   │   ├── requirements.txt        # Python dependencies
-│   │   └── README.md               # Backend documentation
+│   │   │   ├── main.py                # FastAPI application + session management
+│   │   │   ├── detection/
+│   │   │   │   ├── hybrid_detector.py          # Multimodal LSTM detector
+│   │   │   │   ├── multimodal_feature_extractor.py  # Pose + object features
+│   │   │   │   ├── pose_feature_extractor.py   # YOLOv8-Pose (512 dims)
+│   │   │   │   └── object_feature_extractor.py # YOLOv8n (128 dims)
+│   │   │   ├── runtime/
+│   │   │   │   └── session_runner.py  # Session lifecycle + task detection
+│   │   │   ├── ingestion/
+│   │   │   │   └── rtsp_reader.py     # Camera/video stream processing
+│   │   │   ├── state_machine/
+│   │   │   │   └── task_state_machine.py  # Task progression rules
+│   │   │   └── events/
+│   │   │       └── publisher.py       # Event delivery to web app
+│   │   ├── models/checkpoints/        # Trained LSTM weights
+│   │   └── requirements.txt
 │   │
-│   └── web/                        # Next.js frontend
-│       ├── app/                    # Next.js application
-│       ├── components/             # React components
-│       ├── lib/                    # Application libraries
-│       ├── public/                 # Static assets
-│       └── README.md               # Frontend documentation
+│   ├── web/                           # Next.js frontend
+│   │   ├── app/
+│   │   │   ├── (dashboard)/
+│   │   │   │   ├── page.tsx           # Main dashboard
+│   │   │   │   ├── live/page.tsx      # Live session view
+│   │   │   │   ├── sessions/          # Session history + detail
+│   │   │   │   └── reports/           # Report generation
+│   │   │   └── api/                   # API routes
+│   │   ├── components/                # React components
+│   │   ├── lib/                       # Data access, auth, utilities
+│   │   └── public/                    # Static assets (fallback.mp4)
+│   │
+│   └── go2rtc/                        # Camera streaming (Docker)
+│       └── go2rtc.yaml
 │
-├── .env.example                    # Environment variables template
-├── README.md                       # Main project README
-└── docker-compose.yml               # Docker deployment
+├── hybrid-model/                      # AI model training
+│   ├── src/
+│   │   ├── detection/                 # Feature extractors
+│   │   ├── temporal/                  # LSTM model
+│   │   └── training/                  # Training pipeline
+│   ├── doc/                           # Documentation
+│   │   ├── ROBOFLOW_IMPORT.md         # Import annotated data
+│   │   ├── TRAINING.md                # Training guide
+│   │   ├── ARCHITECTURE.md            # Model architecture
+│   │   └── DATA_COLLECTION.md         # Data collection guide
+│   ├── configs/                       # Model hyperparameters
+│   ├── models/                        # Trained weights
+│   ├── data/                          # Frames, annotations, datasets
+│   ├── run_pipeline.py                # Full training pipeline
+│   ├── train_yolo_custom.py           # Custom YOLO training
+│   └── import_roboflow.py             # Roboflow import script
+│
+├── .github/workflows/                 # CI/CD pipelines
+└── README.md                          # This file
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -75,78 +127,124 @@ Milking Monitor
 | Python | 3.8+ |
 | Node.js | 18+ |
 | PostgreSQL | Any recent version |
-| Docker | Optional |
+| Docker | Optional (for go2rtc) |
 
-### 1. Set Up Environment
-
-Copy the example environment file:
+### 1. Set Up Database
 
 ```bash
-cp .env.example .env
+# Create database
+psql -U postgres -c "CREATE DATABASE milking_monitor;"
+
+# Push schema
+cd Monitoring_App/milking-monitor
+npx drizzle-kit push
 ```
 
-**Database connection** — `.env`
+### 2. Set Up Inference Service
 
 ```bash
-DATABASE_URL=postgres://username:password@localhost:5432/milking_monitor
-```
-
-**Inference service** — `.env`
-
-```bash
-RTSP_STREAM_URL=rtsp://your-camera-stream
-WEB_APP_INGEST_URL=http://localhost:3000/api/events/ingest
-WEB_APP_INGEST_TOKEN=your-secure-token
-MODEL_WEIGHTS_PATH=./yolov8n.pt
-```
-
-**Next.js** — `.env.local`
-
-```bash
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=your-auth-secret
-INFERENCE_SERVICE_URL=http://localhost:8001
-INFERENCE_SERVICE_TOKEN=your-token
-```
-
-### 2. Install Dependencies
-
-**Backend**
-
-```bash
-cd apps/inference-service
+cd Monitoring_App/milking-monitor/apps/inference-service
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+.venv\Scripts\activate  # Windows
 pip install -r requirements.txt
-```
 
-**Frontend**
+# Configure .env
+RTSP_STREAM_URL=rtsp://admin:password@camera-ip:554/Streaming/Channels/101
+WEB_APP_INGEST_URL=http://localhost:3000/api/events/ingest
+WEB_APP_INGEST_TOKEN=inference-secret-token
+USE_HYBRID_MODEL=true
 
-```bash
-cd apps/web
-npm install
-```
-
-### 3. Run Services
-
-**Start FastAPI (inference service)**
-
-```bash
-cd apps/inference-service
-source .venv/bin/activate
+# Start
 uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-**Start Next.js**
+### 3. Set Up Web App
 
 ```bash
-cd apps/web
+cd Monitoring_App/milking-monitor/apps/web
+npm install
+
+# Configure .env.local
+DATABASE_URL=postgres://Ayman:LUZAmaxxp001@localhost:5432/milking_monitor
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-secret
+INFERENCE_SERVICE_URL=http://localhost:8001
+INFERENCE_SERVICE_TOKEN=inference-secret-token
+
+# Start
 npm run dev
+```
+
+### 4. Set Up Camera Streaming (Optional)
+
+```bash
+cd Monitoring_App/milking-monitor/apps/go2rtc
+docker-compose up -d
 ```
 
 ---
 
-## 🔌 API Endpoints
+## AI Model Architecture
+
+The system uses a **multimodal LSTM** model for real-time milking task detection:
+
+```
+Frame (1248x576)
+    |
+    +------------------------+
+    v                        v
++-------------+      +-------------+
+| YOLOv8-Pose |      | YOLOv8n     |
+| (keypoints) |      | (objects)   |
++------+------+      +------+------+
+       |                    |
+       v                    v
+   512 dims             128 dims
+       |                    |
+       +----------+---------+
+                  v
+           640 dims/frame
+                  |
+                  v
+         +-----------------+
+         | LSTM Model      |
+         | (30 frames)     |
+         +--------+--------+
+                  |
+                  v
+         +-----------------+
+         | 6 Task Classes  |
+         +-----------------+
+```
+
+### Model Specs
+
+| Component | Details |
+|-----------|---------|
+| **Pose Features** | 512 dims — person detection, arm pose, row position, keypoints, motion, action |
+| **Object Features** | 128 dims — class counts, confidence, spatial grid, temporal stats |
+| **LSTM** | 2.3M params, hidden=256, 2 layers, bidirectional, dropout=0.3 |
+| **Attention** | Self-attention pooling over time steps |
+| **Input** | 30 frames @ 5 FPS = 6 seconds |
+| **Output** | 6 task probabilities |
+| **Val Accuracy** | **73.53%** |
+
+### Detected Tasks
+
+| Task | Name | Visual Signal |
+|------|------|---------------|
+| TASK-01 | Pre-cleaning | Person holds pipe, arms raised |
+| TASK-02 | Stripping | Person hand on udder |
+| TASK-03 | Machine attachment | Person crouching at cow |
+| TASK-04 | Milking | Cups on udder, person walking |
+| TASK-05 | Detachment | Cups dangling in holder |
+| TASK-06 | Post-dip | Person at dip station |
+
+For detailed architecture docs, see [`hybrid-model/doc/`](hybrid-model/doc/).
+
+---
+
+## API Endpoints
 
 ### FastAPI — Port `8001`
 
@@ -163,92 +261,81 @@ npm run dev
 |---|---|---|
 | `GET` | `/api/sessions` | List all sessions |
 | `POST` | `/api/sessions` | Create a new session |
-| `GET` | `/api/events/ingest` | Event ingestion |
+| `GET` | `/api/sessions/active` | Get active session |
+| `POST` | `/api/sessions/{id}/status` | Update session status |
+| `POST` | `/api/events/ingest` | Event ingestion (task + cow_process) |
 | `GET` | `/api/ws?session_id={id}` | Server-Sent Events for real-time updates |
 
 ---
 
-## 🧠 Business Logic
+## Business Logic
 
 ### Task Sequence
 
 | # | Task | Detection Signal |
 |---|---|---|
-| 1 | **TASK-01** — Pre-cleaning | Person + spray bottle detection |
-| 2 | **TASK-02** — Stripping | Person + stripping cup detection |
-| 3 | **TASK-03** — Machine attachment | Teat cups attached |
-| 4 | **TASK-04** — Milking | Teat cups attached |
-| 5 | **TASK-05** — Detachment | Teat cups detached |
-| 6 | **TASK-06** — Post-dip | Person + dip applicator detection |
+| 1 | **TASK-01** — Pre-cleaning | Person + arm raised (pipe/sprayer) |
+| 2 | **TASK-02** — Stripping | Person + stripping cup |
+| 3 | **TASK-03** — Machine attachment | Person crouching at cow |
+| 4 | **TASK-04** — Milking | Cups on udder, person walking |
+| 5 | **TASK-05** — Detachment | Cups dangling in holder |
+| 6 | **TASK-06** — Post-dip | Person at dip station |
 
 ### State Machine Rules
 
 - Tasks progress sequentially when required signals are detected
-- "Teat cups attached" states are detected for process verification
-- Compliance scores are calculated from task completion rates
-- `missed` events trigger compliance alerts
+- Temporal smoothing (3/5 consecutive predictions) prevents flickering
+- Minimum 5s per task, 3s between switches
+- Task completion at 10% of session frames
+- Auto-stop at estimated end time (deadline watchdog)
+- Cow process tracking (TASK-03 = started, TASK-05 = completed)
 
 ---
 
-## ⚙️ Configuration
+## Real-Time Event Flow
 
-### AI Model
-
-- **Model:** YOLOv8 with custom weights (`yolov8n.pt`)
-- **ROI Definition:** Two cow positions (1 & 2)
-- **Threshold Values:** Task-specific confidence thresholds
-- **Detection Classes:** `person`, `spray_bottle`, `stripping_cup`, etc.
-
-### Database Schema
-
-| Table | Purpose |
-|---|---|
-| Sessions | Session metadata and status |
-| Cow Processes | Cow process tracking |
-| Task Events | Detailed task completion events |
-| Reports | Generated compliance reports |
-| Employees | Staff information |
-| Audit Log | Override activity tracking |
-
----
-
-## ⚡ Real-Time Event Flow
-
-```mermaid
-sequenceDiagram
-    participant F as FastAPI (Inference)
-    participant N as Next.js
-    participant D as Dashboard (SSE)
-
-    F->>F: Detect task completion
-    F->>N: POST formatted event
-    N->>N: Store event in database
-    N->>D: Broadcast event via SSE
-    D->>D: Update task completion in real time
+```
+Camera/Video -> RTSP Reader -> Multimodal Extractor -> LSTM -> Task State Machine
+                                                                    |
+                                                                    v
+                                                            Event Publisher
+                                                                    |
+                                                                    v
+                                                            Next.js API
+                                                                    |
+                                                                    v
+                                                            SSE -> Dashboard
 ```
 
-1. FastAPI detects task completion → formats event
-2. Next.js receives event → stores in database
-3. Next.js broadcasts event → connected clients via SSE
-4. Dashboard updates in real time → task completion tracked
-
-### Dashboard Features
-
-- 📹 **Live Session Streaming** — real-time video and task data
-- ✅ **Compliance Checklist** — interactive task status with overrides
-- 🗂️ **Session Management** — create, view, and manage sessions
-- 📄 **Report Generation** — PDF and DOCX reports with compliance metrics
+1. RTSP reader captures frames from camera or fallback video
+2. Multimodal extractor runs YOLOv8-Pose + YOLOv8n (~0.24s/frame)
+3. 30-frame buffer sent to LSTM for inference
+4. Task state machine applies temporal smoothing and detects switches
+5. Events published to web app via HTTP
+6. Web app stores events and broadcasts via SSE
+7. Dashboard updates in real time
 
 ---
 
-## 🔐 Security & Authentication
+## Dashboard Features
+
+- **Live Session Streaming** — real-time video and task data via SSE
+- **Compliance Checklist** — interactive task status with override support
+- **Session Management** — create, view, and manage milking sessions
+- **Report Generation** — PDF and DOCX reports with compliance metrics
+- **Cow Process Tracking** — per-cow milking progress
+- **Employee Performance** — operator compliance scores
+
+---
+
+## Security & Authentication
 
 ### NextAuth Configuration
 
 - **Credentials Provider:** username/password authentication
+- **Email Provider:** Resend for magic links
 - **Session Management:** secure session handling
 - **CSRF Protection:** built-in CSRF protection
-- **Rate Limiting:** API rate limiting implemented
 
 ### Authorization
 
@@ -258,105 +345,98 @@ sequenceDiagram
 
 ---
 
-## 🧪 Development & Testing
+## Development & Testing
 
-### Testing
+### CI/CD Pipeline
 
-- **Unit Tests** — FastAPI endpoint testing
-- **Integration Tests** — full workflow testing
-- **E2E Tests** — complete user journey testing
-- **Mock Testing** — simulated event testing
+GitHub Actions runs three jobs on every push:
 
-### Code Quality
+| Job | Checks |
+|-----|--------|
+| **web-checks** | TypeScript compile, ESLint, unit tests (Vitest) |
+| **inference-checks** | Python lint (ruff), type check, unit tests (pytest) |
+| **integration-checks** | Cross-service validation, schema checks |
 
-- **Linting** — TypeScript and Python linting
-- **Type Checking** — full TypeScript compilation
-- **Code Coverage** — test coverage monitoring
+### Running Tests
+
+```bash
+# Web app
+cd Monitoring_App/milking-monitor/apps/web
+npm run test
+
+# Inference service
+cd Monitoring_App/milking-monitor/apps/inference-service
+python -m pytest tests/
+ruff check src/
+```
 
 ---
 
-## 🐳 Deployment
+## Deployment
 
-### Docker Configuration
+### Docker (go2rtc)
 
 ```yaml
 version: '3.8'
 services:
-  inference-service:
-    build: ./apps/inference-service
+  go2rtc:
+    image: alexxit/go2rtc
     ports:
-      - "8001:8001"
-    environment:
-      - RTSP_STREAM_URL=rtsp://your-camera-stream
-      - WEB_APP_INGEST_URL=http://host.docker.internal:3000/api/events/ingest
+      - "1984:1984"
+      - "8554:8554"
+      - "8555:8555"
     volumes:
-      - ./apps/inference-service/.venv:/app/.venv
-
-  web:
-    build: ./apps/web
-    ports:
-      - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_INFERENCE_URL=http://localhost:8001
-    depends_on:
-      - inference-service
+      - ./go2rtc.yaml:/config/go2rtc.yaml
+      - ../../hybrid-model/data/raw/full_clip.mov:/config/full_clip.mov
 ```
 
-### Environment-Specific Configuration
+### Environment Variables
 
-| Environment | Purpose |
-|---|---|
-| **Development** | Local development with hot reload |
-| **Staging** | Pre-production testing |
-| **Production** | Optimized for production deployment |
+| Service | Key Variables |
+|---------|--------------|
+| **Inference** | `RTSP_STREAM_URL`, `WEB_APP_INGEST_TOKEN`, `USE_HYBRID_MODEL` |
+| **Web** | `DATABASE_URL`, `NEXTAUTH_SECRET`, `INFERENCE_SERVICE_TOKEN` |
+| **Camera** | `go2rtc.yaml` with stream configuration |
 
 ---
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 | Issue | What to Check |
 |---|---|
 | Database connection | Verify `DATABASE_URL` and PostgreSQL availability |
-| RTSP stream | Check camera connectivity and RTSP credentials |
-| YOLO model | Ensure the weights file is accessible |
-| Event ingestion | Verify `INFERENCE_SERVICE_TOKEN` and network connectivity |
-| CORS issues | FastAPI CORS middleware handles all origins |
+| RTSP stream | Camera is cloud-relayed (HikConnect) — requires port forwarding |
+| Model not loading | Check `models/checkpoints/best_model.pt` exists |
+| Task not detected | Lower `HYBRID_THRESHOLD` in `.env` (default 0.15) |
+| Session not ending | Check deadline watchdog (10s interval) |
+| Event not received | Verify `INFERENCE_SERVICE_TOKEN` matches |
 
-### Logging
+### Logs
 
 ```bash
-# Inference service logs
-cd apps/inference-service
-source .venv/bin/activate
-uvicorn src.main:app --reload
+# Inference service
+uvicorn src.main:app --reload  # logs to stdout
 
-# Database queries
-# Check application.log for detailed event processing
+# Check training logs
+cat hybrid-model/train_error.log
 ```
 
 ---
 
-## 🗺️ Roadmap
+## Documentation
 
-- [ ] 📱 **Mobile App** — Android/iOS companion app
-- [ ] 🚪 **API Gateway** — single entry point for all services
-- [ ] 📊 **Monitoring** — Prometheus/Grafana integration
-- [ ] 🤖 **Machine Learning** — advanced anomaly detection
-- [ ] 🏢 **Multi-tenant** — support for multiple farm operations
-
----
-
-## 📬 Contact
-
-For questions, issues, or support:
-
-- Check the [issues tracker](#) for known issues
-- Review the documentation for troubleshooting
-- Submit issues with detailed error messages and steps to reproduce
+| Document | Location | Description |
+|----------|----------|-------------|
+| Inference Service | [`inference-service/README.md`](Monitoring_App/milking-monitor/apps/inference-service/README.md) | Backend API and setup |
+| Hybrid Model | [`hybrid-model/README.md`](hybrid-model/README.md) | AI model architecture |
+| Roboflow Import | [`hybrid-model/doc/ROBOFLOW_IMPORT.md`](hybrid-model/doc/ROBOFLOW_IMPORT.md) | Import annotated data |
+| Training Guide | [`hybrid-model/doc/TRAINING.md`](hybrid-model/doc/TRAINING.md) | How to train models |
+| Architecture | [`hybrid-model/doc/ARCHITECTURE.md`](hybrid-model/doc/ARCHITECTURE.md) | Model architecture details |
+| Data Collection | [`hybrid-model/doc/DATA_COLLECTION.md`](hybrid-model/doc/DATA_COLLECTION.md) | Collect training data |
 
 ---
 
-## 📄 License
+## License
 
 **Commercial — All rights reserved by Ayman Holding**
 
@@ -366,6 +446,6 @@ This project contains proprietary components and intellectual property protected
 
 <div align="center">
 
-*This documentation provides complete guidance for setting up, running, and maintaining the Milking Monitor system. For more detailed technical information, refer to specific component documentation.*
+*For detailed documentation, see the `doc/` folders in each component.*
 
 </div>
