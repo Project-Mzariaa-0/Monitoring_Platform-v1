@@ -545,7 +545,7 @@ export async function createReport(sessionId: string, docxFileUrl: string | null
     id: inserted.id,
     session_id: inserted.session_id,
     generated_at: toISO(inserted.generated_at) ?? "",
-    docx_file_url: inserted.docx_file_url,
+    docx_file_url: inserted.docx_file_url ?? "",
     email_sent_at: toISO(inserted.email_sent_at),
   };
 }

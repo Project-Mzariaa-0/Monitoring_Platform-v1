@@ -6,6 +6,18 @@ from fastapi.testclient import TestClient
 from src.main import app
 
 
+@pytest.fixture(autouse=True)
+def clear_runtime_env(monkeypatch):
+    """Ensure runtime configuration is absent unless explicitly provided by a test."""
+    monkeypatch.delenv("RTSP_STREAM_URL", raising=False)
+    monkeypatch.delenv("FALLBACK_VIDEO_PATH", raising=False)
+    monkeypatch.delenv("WEB_APP_INGEST_URL", raising=False)
+    monkeypatch.delenv("WEB_APP_INGEST_TOKEN", raising=False)
+    monkeypatch.delenv("MODEL_WEIGHTS_PATH", raising=False)
+    monkeypatch.delenv("USE_HYBRID_MODEL", raising=False)
+    monkeypatch.delenv("WEB_APP_URL", raising=False)
+
+
 @pytest.fixture
 def client():
     """Create a FastAPI test client."""

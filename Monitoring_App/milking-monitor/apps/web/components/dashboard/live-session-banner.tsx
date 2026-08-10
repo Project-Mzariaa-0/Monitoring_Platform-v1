@@ -29,9 +29,15 @@ export default function LiveSessionBanner({
 
   useEffect(() => {
     if (!active) return;
-    setNow(Date.now());
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
+
+    const updateNow = () => setNow(Date.now());
+    const timer = window.setTimeout(updateNow, 0);
+    const interval = window.setInterval(updateNow, 1000);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
   }, [active]);
 
   const elapsed = active && scheduledStart ? formatElapsedWith(scheduledStart, now) : "--:--";
