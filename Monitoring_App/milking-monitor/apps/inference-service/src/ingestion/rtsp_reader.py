@@ -3,8 +3,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from dataclasses import dataclass, field
 
 import cv2
+
+from src.ingestion.stream_health import StreamHealth
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +16,7 @@ logger = logging.getLogger(__name__)
 class RtspReader:
     stream_url: str
     fallback_video_path: str | None = None
+    health: StreamHealth = field(default_factory=StreamHealth, init=False)
 
     def _open_fallback(self):
         if self.fallback_video_path and Path(self.fallback_video_path).exists():
@@ -29,13 +33,17 @@ class RtspReader:
             success, test_frame = capture.read()
             if success:
                 frame_index = 0
+                self.health.record_frame()
                 yield frame_index, test_frame
                 frame_index = 1
                 try:
                     while True:
                         success, frame = capture.read()
                         if not success:
+                            self.health.record_failure()
+                            logger.warning("RTSP frame read failed after %d frames: %s", frame_index, self.stream_url)
                             break
+                        self.health.record_frame()
                         yield frame_index, frame
                         frame_index += 1
                         if limit is not None and frame_index >= limit:
@@ -44,6 +52,7 @@ class RtspReader:
                     capture.release()
                 return
             else:
+                self.health.record_failure()
                 logger.warning("RTSP opened but first read failed: %s", self.stream_url)
                 capture.release()
         else:
@@ -65,7 +74,9 @@ class RtspReader:
                     fallback.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     success, frame = fallback.read()
                     if not success:
+                        self.health.record_failure()
                         break
+                self.health.record_frame()
                 yield frame_index, frame
                 frame_index += 1
                 if limit is not None and frame_index >= limit:

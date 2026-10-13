@@ -4,8 +4,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 type Go2rtcStream = {
   name: string;
-  source: string;
-  api_url: string;
+  source?: string;
+  api_url?: string;
   webrtc_url: string;
   mse_url: string;
   mjpeg_url: string;

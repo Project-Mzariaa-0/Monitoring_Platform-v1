@@ -1,48 +1,44 @@
 import { publish } from "../../../../lib/realtime/broadcast";
 import { ingestTaskEvent, updateCowProcess } from "../../../../lib/data/store";
+import { buildTaskEventFingerprint } from "../../../../lib/data/event-dedupe";
+import { ingestEventContractSchema } from "../../../../lib/validation/event-contract";
 import { rateLimit } from "../../../../lib/security/rate-limit";
-import { z } from "zod";
-
-const ingestEventSchema = z.object({
-  session_id: z.string().uuid(),
-  task_id: z.string().optional(),
-  event_type: z.string().optional(),
-  cow_position: z.number().int().min(1).max(2).optional(),
-  status: z.enum(["completed", "missed", "anomaly_flagged", "unverifiable"]).optional(),
-  confidence_score: z.number().min(0).max(1).optional(),
-  detected_start_time: z.string().nullable().optional(),
-  detected_end_time: z.string().nullable().optional(),
-  duration_seconds: z.number().optional(),
-  process_status: z.string().optional(),
-  detected_time: z.string().optional(),
-}).passthrough();
 
 export async function POST(request: Request) {
+  const requestId = request.headers.get("x-request-id") || crypto.randomUUID();
+  const jsonResponse = (body: unknown, init?: ResponseInit) => {
+    const headers = new Headers(init?.headers);
+    headers.set("x-request-id", requestId);
+    return Response.json(body, { ...init, headers });
+  };
+  const log = (message: string, fields: Record<string, unknown> = {}) => {
+    console.info(JSON.stringify({ timestamp: new Date().toISOString(), request_id: requestId, message, ...fields }));
+  };
   const expectedToken = process.env.INFERENCE_SERVICE_TOKEN;
   const authorization = request.headers.get("authorization");
   const clientId = authorization ?? request.headers.get("x-forwarded-for") ?? "anonymous";
   const limit = rateLimit(`ingest:${clientId}`, 120, 60_000);
 
   if (!limit.allowed) {
-    return Response.json({ ok: false, error: "Rate limit exceeded" }, { status: 429, headers: { "Retry-After": String(Math.ceil((limit.resetAt - Date.now()) / 1000)) } });
+    return jsonResponse({ ok: false, error: "Rate limit exceeded" }, { status: 429, headers: { "Retry-After": String(Math.ceil((limit.resetAt - Date.now()) / 1000)) } });
   }
 
   if (!expectedToken) {
-    return Response.json({ ok: false, error: "Server misconfiguration: INFERENCE_SERVICE_TOKEN not set" }, { status: 500 });
+    return jsonResponse({ ok: false, error: "Server misconfiguration: INFERENCE_SERVICE_TOKEN not set" }, { status: 500 });
   }
 
   if (authorization !== `Bearer ${expectedToken}`) {
-    return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    return jsonResponse({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   const body = await request.json().catch(() => null);
   if (!body) {
-    return Response.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+    return jsonResponse({ ok: false, error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const parsed = ingestEventSchema.safeParse(body);
+  const parsed = ingestEventContractSchema.safeParse(body);
   if (!parsed.success) {
-    return Response.json(
+    return jsonResponse(
       { ok: false, error: "Validation failed", details: parsed.error.flatten().fieldErrors },
       { status: 422 },
     );
@@ -50,38 +46,61 @@ export async function POST(request: Request) {
 
   const { session_id: sessionId } = parsed.data;
 
-  if (parsed.data.task_id && parsed.data.cow_position && parsed.data.status) {
-    try {
-      await ingestTaskEvent({
+  const taskFingerprint = parsed.data.event_type === "task_event"
+    ? buildTaskEventFingerprint({
         session_id: sessionId,
-        cow_position: parsed.data.cow_position as 1 | 2,
-        task_id: parsed.data.task_id as "TASK-01" | "TASK-02" | "TASK-03" | "TASK-04" | "TASK-05" | "TASK-06",
+        cow_position: parsed.data.cow_position,
+        task_id: parsed.data.task_id,
+        status: parsed.data.status,
+        detected_start_time: parsed.data.detected_start_time,
+        detected_end_time: parsed.data.detected_end_time,
+        duration_seconds: parsed.data.duration_seconds,
+      })
+    : null;
+
+  if (parsed.data.event_type === "task_event") {
+    try {
+      const persisted = await ingestTaskEvent({
+        session_id: sessionId,
+        cow_position: parsed.data.cow_position,
+        task_id: parsed.data.task_id,
         status: parsed.data.status,
         confidence_score: parsed.data.confidence_score,
-        detected_start_time: (parsed.data as Record<string, unknown>).detected_start_time as string | null | undefined,
-        detected_end_time: (parsed.data as Record<string, unknown>).detected_end_time as string | null | undefined,
-        duration_seconds: (parsed.data as Record<string, unknown>).duration_seconds as number | undefined,
+        completion_percentage: parsed.data.completion_percentage,
+        detected_start_time: parsed.data.detected_start_time,
+        detected_end_time: parsed.data.detected_end_time,
+        duration_seconds: parsed.data.duration_seconds,
       });
-    } catch {
-      // DB write failed — events still broadcast via SSE
+      if (!persisted) {
+        console.warn(
+          `[ingest] Task event dropped (no matching cow process): session=${sessionId} position=${parsed.data.cow_position} task=${parsed.data.task_id}`,
+        );
+        return jsonResponse({ ok: false, error: "No matching cow process for session" }, { status: 404 });
+      }
+
+      if (taskFingerprint && persisted) {
+        log("Task event accepted", { event_type: "task_event", session_id: sessionId, fingerprint: taskFingerprint });
+      }
+    } catch (error) {
+      console.error("Failed to persist task event", error);
+      return jsonResponse({ ok: false, error: "Failed to persist task event" }, { status: 500 });
     }
   }
 
-  if (parsed.data.event_type === "cow_process" && parsed.data.cow_position) {
+  if (parsed.data.event_type === "cow_process") {
     try {
-      const processStatus = parsed.data.process_status as "started" | "completed" | undefined;
-      const detectedTime = parsed.data.detected_time as string | undefined;
-      await updateCowProcess(sessionId, parsed.data.cow_position as 1 | 2, processStatus, detectedTime);
-    } catch {
-      // DB write failed
+      await updateCowProcess(sessionId, parsed.data.cow_position, parsed.data.process_status, parsed.data.detected_time);
+    } catch (error) {
+      console.error("Failed to update cow process", error);
     }
   }
 
   publish(sessionId, {
     session_id: sessionId,
-    type: parsed.data.event_type ?? parsed.data.task_id ?? "event",
+    type: parsed.data.event_type === "task_event" ? parsed.data.task_id : parsed.data.event_type,
     payload: parsed.data,
   });
 
-  return Response.json({ ok: true, route: "events:ingest" });
+  log("Event ingested", { event_type: parsed.data.event_type, session_id: sessionId });
+  return jsonResponse({ ok: true, route: "events:ingest" });
 }

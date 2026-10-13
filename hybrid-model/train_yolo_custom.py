@@ -35,10 +35,16 @@ def prepare_dataset():
         print("No annotations found. Run label_tool.py first.")
         return False
 
-    with open(LABELS_FILE) as f:
+    with open(LABELS_FILE, encoding="utf8") as f:
         annotations = json.load(f)
 
-    print(f"Found {len(annotations)} annotated images")
+    # Support two shapes: {"images": {path: {"boxes":[...]}}} OR { path: [ {...}, ... ] }
+    if isinstance(annotations, dict) and "images" in annotations:
+        images_map = annotations["images"]
+    else:
+        images_map = annotations
+
+    print(f"Found {len(images_map)} annotated images")
 
     # Clear dataset
     for split in ["train", "val"]:
@@ -48,7 +54,7 @@ def prepare_dataset():
                 shutil.rmtree(d)
             d.mkdir(parents=True, exist_ok=True)
 
-    items = list(annotations.items())
+    items = list(images_map.items())
     random.shuffle(items)
     split_idx = int(len(items) * (1 - VAL_SPLIT))
     train_items = items[:split_idx]
@@ -57,34 +63,69 @@ def prepare_dataset():
     print(f"Train: {len(train_items)}, Val: {len(val_items)}")
 
     for split_name, split_items in [("train", train_items), ("val", val_items)]:
-        for img_path, boxes in split_items:
-            if not os.path.exists(img_path):
-                continue
+        for img_path, boxes_wrapper in split_items:
+            # normalize Windows paths
+            img_path_norm = os.path.normpath(img_path)
+            if not os.path.exists(img_path_norm):
+                # Try relative path inside data/frames
+                candidate = str(FRAMES_DIR / os.path.basename(img_path_norm))
+                if os.path.exists(candidate):
+                    img_path_norm = candidate
+                else:
+                    continue
 
             # Copy image
-            dst_img = DATASET_DIR / "images" / split_name / os.path.basename(img_path)
-            shutil.copy2(img_path, dst_img)
+            dst_img = DATASET_DIR / "images" / split_name / os.path.basename(img_path_norm)
+            shutil.copy2(img_path_norm, dst_img)
 
             # Create label file
-            label_path = DATASET_DIR / "labels" / split_name / (Path(img_path).stem + ".txt")
-            img = __import__("PIL").Image.open(img_path)
+            label_path = DATASET_DIR / "labels" / split_name / (Path(img_path_norm).stem + ".txt")
+            img = __import__("PIL").Image.open(img_path_norm)
             w, h = img.size
+
+            # normalize boxes wrapper
+            if isinstance(boxes_wrapper, dict) and "boxes" in boxes_wrapper:
+                boxes = boxes_wrapper["boxes"]
+            elif isinstance(boxes_wrapper, list):
+                boxes = boxes_wrapper
+            else:
+                boxes = []
 
             lines = []
             for box in boxes:
-                cls = box["class"] - 1
-                if cls < 0 or cls >= len(CLASSES):
+                # accept either 'class' or 'class_id'
+                cls_val = box.get("class") if box.get("class") is not None else box.get("class_id")
+                if cls_val is None:
                     continue
-                x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
-                cx = ((x1 + x2) / 2) / w
-                cy = ((y1 + y2) / 2) / h
-                bw = (x2 - x1) / w
-                bh = (y2 - y1) / h
-                lines.append(f"{cls} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+                try:
+                    cls_int = int(cls_val)
+                except Exception:
+                    continue
+                # convert 1-index to 0-index if necessary
+                if 1 <= cls_int <= len(CLASSES):
+                    cls0 = cls_int - 1
+                else:
+                    cls0 = cls_int
 
-            with open(label_path, "w") as f:
+                if all(k in box for k in ("x1", "y1", "x2", "y2")):
+                    x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
+                    cx = ((x1 + x2) / 2) / w
+                    cy = ((y1 + y2) / 2) / h
+                    bw = (x2 - x1) / w
+                    bh = (y2 - y1) / h
+                    lines.append(f"{cls0} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+                elif all(k in box for k in ("cx", "cy", "w", "h")):
+                    cx, cy, bw, bh = box["cx"], box["cy"], box["w"], box["h"]
+                    lines.append(f"{cls0} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+                elif all(k in box for k in ("x", "y", "width", "height")):
+                    cx, cy, bw, bh = box["x"], box["y"], box["width"], box["height"]
+                    lines.append(f"{cls0} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+                else:
+                    # unknown bbox format — skip
+                    continue
+
+            with open(label_path, "w", encoding="utf8") as f:
                 f.write("\n".join(lines))
-
     # Create dataset YAML
     yaml_content = f"""path: {DATASET_DIR.resolve()}
 train: images/train
@@ -101,7 +142,7 @@ names: {CLASSES}
     return True
 
 
-def train():
+def train(epochs: int = 150):
     yaml_path = DATASET_DIR / "dataset.yaml"
     if not yaml_path.exists():
         print("Dataset not prepared. Run with --prepare first.")
@@ -111,7 +152,7 @@ def train():
 
     results = model.train(
         data=str(yaml_path),
-        epochs=150,
+        epochs=epochs,
         imgsz=640,
         batch=16,
         name="milking_custom",
@@ -134,8 +175,12 @@ def train():
 
 if __name__ == "__main__":
     import sys
+    smoke = "--smoke" in sys.argv
     if "--prepare" in sys.argv:
         prepare_dataset()
     else:
         if prepare_dataset():
-            train()
+            if smoke:
+                train(epochs=1)
+            else:
+                train()

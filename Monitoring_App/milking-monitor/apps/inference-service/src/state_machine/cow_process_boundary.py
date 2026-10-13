@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from src.utils.label_aliases import normalize_class_name
+
 
 class CowProcessBoundaryDetector:
     def __init__(self, thresholds: dict):
@@ -9,7 +11,7 @@ class CowProcessBoundaryDetector:
         self.active_sessions: dict[tuple[str, int], dict[str, object]] = {}
 
     def update(self, session_id: str, cow_position: int, detections: list) -> list[dict]:
-        class_names = {getattr(detection, "class_name", "") for detection in detections}
+        class_names = {normalize_class_name(getattr(detection, "class_name", "")) for detection in detections}
         key = (session_id, cow_position)
         events: list[dict] = []
         now = datetime.now(timezone.utc).isoformat()

@@ -2,29 +2,60 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
+import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from src.config import settings
 from src.runtime.session_runner import SessionRunner, _parse_end_time
+from src.services.diagnostics import build_service_status
+from src.services.runtime_validation import validate_runtime_configuration
+from src.services.session_manager import SessionManager
+from src.services.session_runtime_service import SessionRuntimeService
+from src.observability.logging import clear_request_id, configure_logging, set_request_id
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+configure_logging()
 logger = logging.getLogger(__name__)
+SERVICE_START_TIME = datetime.now(timezone.utc)
 
-app = FastAPI(title="Inference Service")
 
-ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    _startup_tasks()
+    try:
+        yield
+    finally:
+        _shutdown_tasks()
+        logger.info("Application shutdown complete")
+
+
+app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
+
+
+@app.middleware("http")
+async def add_request_id(request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    token = set_request_id(request_id)
+    try:
+        response = await call_next(request)
+    finally:
+        clear_request_id(token)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+ALLOWED_ORIGINS = settings.cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -33,39 +64,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-active_runners: dict[str, SessionRunner] = {}
-active_threads: dict[str, threading.Thread] = {}
-_runner_lock = threading.Lock()
+session_manager = SessionManager(settings)
+session_runtime_service = SessionRuntimeService(settings, session_manager)
 
 
 def _deadline_watchdog() -> None:
-    """Background thread: every 10s, force-stop any runner past its deadline."""
+    """Background thread: every 10s, force-stop any runner past its deadline.
+
+    Waits for the runner thread to exit (so end-of-session task events are
+    flushed) before marking the session completed and unregistering it.
+    """
     while True:
         time.sleep(10)
         now = datetime.now(timezone.utc)
-        to_stop: list[str] = []
         try:
-            with _runner_lock:
-                for sid, runner in list(active_runners.items()):
-                    deadline = _parse_end_time(runner.end_time)
-                    if deadline and now >= deadline:
-                        logger.warning("Watchdog: session %s past deadline %s, force-stopping", sid, deadline.isoformat())
-                        runner.stop()
-                        to_stop.append(sid)
+            for sid, runner in list(session_manager.active_runners.items()):
+                deadline = _parse_end_time(runner.end_time)
+                if not (deadline and now >= deadline):
+                    continue
+
+                thread = session_manager.active_threads.get(sid)
+                if not runner.stop_event.is_set():
+                    logger.warning("Watchdog: session %s past deadline %s, force-stopping", sid, deadline.isoformat())
+                    runner.stop()
+
+                if thread is not None and thread.is_alive():
+                    # Give the runner time to publish its end-of-session task events
+                    thread.join(timeout=90)
+
+                if thread is not None and thread.is_alive():
+                    logger.warning("Watchdog: session %s still flushing after force-stop; will retry next cycle", sid)
+                    continue
+
+                if not session_manager.is_session_active(sid):
+                    # Already finished via on_stop/stop endpoint (which marks completed);
+                    # skip to avoid a duplicate status update.
+                    continue
+
+                try:
+                    _mark_session_completed(sid)
+                except Exception:
+                    logger.exception("Watchdog: failed to mark session %s completed", sid)
+                session_manager.unregister(sid)
+                logger.info("Watchdog: session %s removed from active runners", sid)
         except Exception:
             logger.exception("Watchdog: error checking deadlines")
 
-        for sid in to_stop:
-            try:
-                _mark_session_completed(sid)
-            except Exception:
-                logger.exception("Watchdog: failed to mark session %s completed", sid)
-            with _runner_lock:
-                active_runners.pop(sid, None)
-                active_threads.pop(sid, None)
-            logger.info("Watchdog: session %s removed from active runners", sid)
-
-WEB_APP_URL = os.getenv("WEB_APP_URL", "http://localhost:3000")
+WEB_APP_URL = settings.web_app_url
 
 
 class SessionWindowPayload(BaseModel):
@@ -80,13 +125,11 @@ def load_json_file(path: Path) -> dict:
 
 
 def get_rois() -> dict:
-    config_path = Path(__file__).resolve().parent / "config" / "rois.json"
-    return load_json_file(config_path)
+    return load_json_file(settings.rois_file)
 
 
 def get_thresholds() -> dict:
-    config_path = Path(__file__).resolve().parent / "config" / "thresholds.json"
-    return load_json_file(config_path)
+    return load_json_file(settings.thresholds_file)
 
 
 @app.get("/")
@@ -94,15 +137,35 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/health")
+def health_check_extended() -> dict:
+    report = validate_runtime_configuration(settings)
+    return {
+        "status": "ok" if report["ready"] else "degraded",
+        "ready": report["ready"],
+        "errors": report["errors"],
+        "service": build_service_status(settings, session_manager, started_at=SERVICE_START_TIME),
+    }
+
+
+@app.get("/ready")
+def readiness_check() -> dict:
+    report = validate_runtime_configuration(settings)
+    return {
+        "ready": report["ready"],
+        "errors": report["errors"],
+        "service": build_service_status(settings, session_manager, started_at=SERVICE_START_TIME),
+    }
+
+
 @app.get("/active-sessions")
 def list_active_sessions() -> dict[str, list[str]]:
-    return {"sessions": list(active_runners.keys())}
+    return {"sessions": session_manager.list_active_sessions()}
 
 
 @app.get("/hybrid-status")
 def hybrid_model_status() -> dict:
-    use_hybrid = os.getenv("USE_HYBRID_MODEL", "false").lower() in ("true", "1", "yes")
-    if not use_hybrid:
+    if not settings.use_hybrid_model:
         return {"enabled": False, "ready": False, "loading": False, "active_session": None}
 
     from src.detection.hybrid_model_manager import get_hybrid_manager
@@ -129,9 +192,12 @@ def _mark_session_completed(session_id: str) -> None:
 def _update_session_status(session_id: str, status: str) -> None:
     """Update session status in the web app."""
     try:
-        web_app_url = os.getenv("WEB_APP_URL", "http://localhost:3000")
+        web_app_url = settings.web_app_url
         from src.events.publisher import _create_client
-        client = _create_client(web_app_url, "")
+        ingest_token = settings.web_app_ingest_token or os.environ.get("INFERENCE_SERVICE_TOKEN", "") or ""
+        client = _create_client(web_app_url, ingest_token)
+        if ingest_token:
+            client.headers["Authorization"] = f"Bearer {ingest_token}"
         try:
             resp = client.post(
                 f"{web_app_url}/api/sessions/{session_id}/status",
@@ -147,29 +213,46 @@ def _update_session_status(session_id: str, status: str) -> None:
         logger.exception("Failed to mark session %s as %s", session_id, status)
 
 
+def _shutdown_tasks() -> None:
+    for sid in list(session_manager.list_active_sessions()):
+        try:
+            runner = session_manager.active_runners.get(sid)
+            if runner:
+                runner.stop()
+        except Exception:
+            logger.exception("Shutdown: failed to stop session %s", sid)
+        finally:
+            session_manager.unregister(sid)
+    logger.info("Shutdown complete: active sessions cleared")
+
+
 def _start_session_runner(session_id: str, start_time: str, end_time: str) -> None:
-    with _runner_lock:
-        if session_id in active_runners:
+    start_deadline = _parse_end_time(start_time)
+    if start_deadline and datetime.now(timezone.utc) < start_deadline:
+        delay = (start_deadline - datetime.now(timezone.utc)).total_seconds()
+        logger.info("Session %s scheduled to start in %.1f seconds", session_id, delay)
+        timer = threading.Timer(delay, _start_session_runner, args=(session_id, start_time, end_time))
+        timer.daemon = True
+        timer.start()
+        return
+
+    if not session_runtime_service.can_start_session(session_id):
+        if session_manager.is_session_active(session_id):
             logger.info("Session %s already running, skipping", session_id)
-            return
-        if len(active_runners) > 0:
-            existing = list(active_runners.keys())
-            logger.warning("Session %s rejected: session(s) %s already active (only one session at a time)", session_id, existing)
-            return
-
-    stream_url = os.getenv("RTSP_STREAM_URL")
-    if not stream_url:
-        logger.error("RTSP_STREAM_URL not configured, cannot start session %s", session_id)
+        else:
+            logger.warning("Session %s rejected: session(s) %s already active (only one session at a time)", session_id, session_manager.list_active_sessions())
         return
 
-    fallback_video_path = os.getenv("FALLBACK_VIDEO_PATH")
-    ingest_url = os.getenv("WEB_APP_INGEST_URL")
-    ingest_token = os.getenv("WEB_APP_INGEST_TOKEN")
-    if not ingest_url or not ingest_token:
-        logger.error("WEB_APP_INGEST_URL/TOKEN not configured, cannot start session %s", session_id)
+    validation = validate_runtime_configuration(settings)
+    if not validation["ready"]:
+        logger.error("Session %s could not start: %s", session_id, validation["errors"])
         return
 
-    weights_path = os.getenv("MODEL_WEIGHTS_PATH", "yolov8n.pt")
+    stream_url = settings.rtsp_stream_url
+    fallback_video_path = settings.fallback_video_path
+    ingest_url = settings.web_app_ingest_url
+    ingest_token = settings.web_app_ingest_token
+    weights_path = str(settings.model_weights_path)
     try:
         rois = get_rois()
         thresholds = get_thresholds()
@@ -179,13 +262,12 @@ def _start_session_runner(session_id: str, start_time: str, end_time: str) -> No
 
     def _on_runner_stop(stopped_session_id: str) -> None:
         _mark_session_completed(stopped_session_id)
-        with _runner_lock:
-            active_runners.pop(stopped_session_id, None)
-            active_threads.pop(stopped_session_id, None)
+        session_manager.unregister(stopped_session_id)
         logger.info("Session %s: removed from active runners", stopped_session_id)
 
-    runner = SessionRunner(
+    runner = session_runtime_service.build_runner(
         session_id=session_id,
+        end_time=end_time,
         stream_url=stream_url,
         fallback_video_path=fallback_video_path,
         ingest_url=ingest_url,
@@ -193,29 +275,23 @@ def _start_session_runner(session_id: str, start_time: str, end_time: str) -> No
         weights_path=weights_path,
         rois=rois,
         thresholds=thresholds,
-        end_time=end_time,
-        on_stop=_on_runner_stop,
-        use_hybrid=os.getenv("USE_HYBRID_MODEL", "false").lower() in ("true", "1", "yes"),
     )
+    runner.on_stop = _on_runner_stop
 
     thread = threading.Thread(target=runner.run, daemon=True)
-    with _runner_lock:
-        active_runners[session_id] = runner
-        active_threads[session_id] = thread
+    session_manager.register(session_id, runner, thread)
     thread.start()
     logger.info("Started inference for session %s", session_id)
 
     _mark_session_active(session_id)
 
 
-@app.on_event("startup")
-def startup_tasks() -> None:
+def _startup_tasks() -> None:
     """Pre-load hybrid model, start deadline watchdog, and discover scheduled sessions."""
     threading.Thread(target=_deadline_watchdog, daemon=True).start()
     logger.info("Deadline watchdog started (checks every 10s)")
 
-    use_hybrid = os.getenv("USE_HYBRID_MODEL", "false").lower() in ("true", "1", "yes")
-    if use_hybrid:
+    if settings.use_hybrid_model:
         from src.detection.hybrid_model_manager import get_hybrid_manager
         manager = get_hybrid_manager()
         manager.start_background_load()
@@ -223,7 +299,7 @@ def startup_tasks() -> None:
 
     def _discover():
         try:
-            web_app_url = os.getenv("WEB_APP_URL", "http://localhost:3000")
+            web_app_url = settings.web_app_url
             from src.events.publisher import _create_client
 
             client = _create_client(web_app_url, "")
@@ -259,25 +335,34 @@ def startup_tasks() -> None:
 def receive_session_window(payload: SessionWindowPayload) -> dict[str, str]:
     logger.info("Received session window for session %s", payload.session_id)
 
-    with _runner_lock:
-        if payload.session_id in active_runners:
+    if not session_runtime_service.can_start_session(payload.session_id):
+        if session_manager.is_session_active(payload.session_id):
             raise HTTPException(status_code=409, detail=f"Session {payload.session_id} is already running")
-        if len(active_runners) > 0:
-            existing = list(active_runners.keys())
-            raise HTTPException(status_code=409, detail=f"Session {payload.session_id} rejected: session(s) {existing} already active (only one session at a time)")
+        existing = session_manager.list_active_sessions()
+        raise HTTPException(status_code=409, detail=f"Session {payload.session_id} rejected: session(s) {existing} already active (only one session at a time)")
 
-    stream_url = os.getenv("RTSP_STREAM_URL")
-    if not stream_url:
-        raise HTTPException(status_code=400, detail="RTSP_STREAM_URL is not configured")
+    validation = validate_runtime_configuration(settings)
+    if not validation["ready"]:
+        raise HTTPException(status_code=400, detail={"errors": validation["errors"]})
 
-    fallback_video_path = os.getenv("FALLBACK_VIDEO_PATH")
+    start_deadline = _parse_end_time(payload.start_time)
+    if start_deadline and datetime.now(timezone.utc) < start_deadline:
+        delay = (start_deadline - datetime.now(timezone.utc)).total_seconds()
+        logger.info("Session %s scheduled to start in %.1f seconds", payload.session_id, delay)
+        timer = threading.Timer(
+            delay,
+            _start_session_runner,
+            args=(payload.session_id, payload.start_time, payload.end_time),
+        )
+        timer.daemon = True
+        timer.start()
+        return {"status": "scheduled", "session_id": payload.session_id}
 
-    ingest_url = os.getenv("WEB_APP_INGEST_URL")
-    ingest_token = os.getenv("WEB_APP_INGEST_TOKEN")
-    if not ingest_url or not ingest_token:
-        raise HTTPException(status_code=400, detail="WEB_APP_INGEST_URL and WEB_APP_INGEST_TOKEN are required")
-
-    weights_path = os.getenv("MODEL_WEIGHTS_PATH", "yolov8n.pt")
+    stream_url = settings.rtsp_stream_url
+    fallback_video_path = settings.fallback_video_path
+    ingest_url = settings.web_app_ingest_url
+    ingest_token = settings.web_app_ingest_token
+    weights_path = str(settings.model_weights_path)
     try:
         rois = get_rois()
         thresholds = get_thresholds()
@@ -286,13 +371,12 @@ def receive_session_window(payload: SessionWindowPayload) -> dict[str, str]:
 
     def _on_runner_stop(stopped_session_id: str) -> None:
         _mark_session_completed(stopped_session_id)
-        with _runner_lock:
-            active_runners.pop(stopped_session_id, None)
-            active_threads.pop(stopped_session_id, None)
+        session_manager.unregister(stopped_session_id)
         logger.info("Session %s: removed from active runners", stopped_session_id)
 
-    runner = SessionRunner(
+    runner = session_runtime_service.build_runner(
         session_id=payload.session_id,
+        end_time=payload.end_time,
         stream_url=stream_url,
         fallback_video_path=fallback_video_path,
         ingest_url=ingest_url,
@@ -300,15 +384,11 @@ def receive_session_window(payload: SessionWindowPayload) -> dict[str, str]:
         weights_path=weights_path,
         rois=rois,
         thresholds=thresholds,
-        end_time=payload.end_time,
-        on_stop=_on_runner_stop,
-        use_hybrid=os.getenv("USE_HYBRID_MODEL", "false").lower() in ("true", "1", "yes"),
     )
+    runner.on_stop = _on_runner_stop
 
     thread = threading.Thread(target=runner.run, daemon=True)
-    with _runner_lock:
-        active_runners[payload.session_id] = runner
-        active_threads[payload.session_id] = thread
+    session_manager.register(payload.session_id, runner, thread)
     thread.start()
 
     logger.info("Started inference for session %s", payload.session_id)
@@ -318,8 +398,8 @@ def receive_session_window(payload: SessionWindowPayload) -> dict[str, str]:
 @app.post("/test-send")
 def test_send_events(payload: SessionWindowPayload) -> dict:
     """Send fake events to Next.js ingest to test the full pipeline."""
-    ingest_url = os.getenv("WEB_APP_INGEST_URL")
-    ingest_token = os.getenv("WEB_APP_INGEST_TOKEN")
+    ingest_url = settings.web_app_ingest_url
+    ingest_token = settings.web_app_ingest_token
     if not ingest_url or not ingest_token:
         return {"status": "error", "detail": f"Missing env vars. url={ingest_url!r} token={ingest_token!r}"}
 
@@ -341,12 +421,14 @@ def test_send_events(payload: SessionWindowPayload) -> dict:
         try:
             for task_id, status, confidence, cow_pos in tasks:
                 event = {
+                    "contract_version": "1.0",
                     "session_id": payload.session_id,
                     "event_type": "task_event",
                     "task_id": task_id,
                     "cow_position": cow_pos,
                     "status": "completed",
                     "confidence_score": confidence,
+                    "completion_percentage": 100.0,
                     "detected_start_time": "2026-07-03T12:00:00Z",
                     "detected_end_time": "2026-07-03T12:00:10Z",
                     "duration_seconds": 10,
@@ -374,13 +456,17 @@ def test_send_events(payload: SessionWindowPayload) -> dict:
 
 @app.post("/session-window/{session_id}/stop")
 def stop_session_window(session_id: str) -> dict[str, str]:
-    runner = active_runners.get(session_id)
+    runner = session_manager.active_runners.get(session_id)
     if runner is None:
         raise HTTPException(status_code=404, detail="Session runner not found")
 
     runner.stop()
-    with _runner_lock:
-        active_runners.pop(session_id, None)
-        active_threads.pop(session_id, None)
+    thread = session_manager.active_threads.get(session_id)
+    if thread is not None and thread.is_alive():
+        # Wait so end-of-session task-event publishing completes before marking done
+        thread.join(timeout=60)
+    # Persist final state immediately so session history is available even if shutdown is abrupt.
+    _mark_session_completed(session_id)
+    session_manager.unregister(session_id)
     logger.info("Stopped inference for session %s", session_id)
     return {"status": "stopping", "session_id": session_id}

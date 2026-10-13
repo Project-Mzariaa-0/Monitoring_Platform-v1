@@ -4,10 +4,11 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "contract_version": { "const": "1.0" },
     "session_id": { "type": "string" },
     "cow_position": { "type": "integer", "enum": [1, 2] },
     "event_type": { "type": "string", "enum": ["started", "completed"] },
     "detected_time": { "type": "string", "format": "date-time" }
   },
-  "required": ["session_id", "cow_position", "event_type", "detected_time"]
+  "required": ["contract_version", "session_id", "cow_position", "event_type", "detected_time"]
 }

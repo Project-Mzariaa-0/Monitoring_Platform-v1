@@ -1,4 +1,5 @@
 import { getStatistics } from "../../../lib/data/store";
+import { formatInMorocco } from "../../../lib/time/morocco";
 import ReportGenerator from "../../../components/reports/report-generator";
 import ReportDownloadButton from "../../../components/reports/report-download-button";
 
@@ -30,7 +31,7 @@ export default async function ReportsPage() {
                 <div>
                   <div style={{ fontWeight: 700 }}>{report.session_id.slice(0, 8)}</div>
                   <div className="muted" style={{ fontSize: 14 }}>
-                    Generated {new Date(report.generated_at).toLocaleString()}
+                    Generated {formatInMorocco(report.generated_at)} (Morocco)
                   </div>
                 </div>
                 <ReportDownloadButton sessionId={report.session_id} />

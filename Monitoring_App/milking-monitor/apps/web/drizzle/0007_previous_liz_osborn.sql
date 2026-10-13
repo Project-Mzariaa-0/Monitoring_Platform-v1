@@ -1,0 +1,1 @@
+ALTER TABLE "task_events" ADD COLUMN "confidence_score" real DEFAULT 0 NOT NULL;

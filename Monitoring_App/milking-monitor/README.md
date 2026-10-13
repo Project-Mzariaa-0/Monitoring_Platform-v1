@@ -121,6 +121,21 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/
 http://localhost:3000
 ```
 
+## Production Deployment
+
+Production uses the immutable-build Compose file rather than the development stack:
+
+```bash
+docker compose -f docker-compose.prod.yml config --quiet
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Production configuration and operational procedures are documented in:
+
+- [Production deployment ADR](docs/adr/001-production-deployment.md)
+- [Production operations runbook](docs/runbooks/production-operations.md)
+- [Release and rollback runbook](docs/runbooks/release-rollback.md)
+
 ## Service Details
 
 ### PostgreSQL

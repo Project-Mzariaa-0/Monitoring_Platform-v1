@@ -1,8 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { redirectOnApiError } from "../../lib/api/error";
 
 export default function ReportGenerator({ sessionId }: { sessionId: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [loading, setLoading] = useState(false);
 
   async function generateReport() {
@@ -16,7 +20,11 @@ export default function ReportGenerator({ sessionId }: { sessionId: string }) {
 
       if (!response.ok) {
         const err = await response.json().catch(() => null);
-        alert(err?.error ?? "Report generation failed");
+        const message = err?.error ?? "Report generation failed";
+        if (redirectOnApiError((url) => router.push(url), response.status, message, pathname)) {
+          return;
+        }
+        alert(message);
         return;
       }
 
@@ -30,7 +38,10 @@ export default function ReportGenerator({ sessionId }: { sessionId: string }) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch {
-      alert("Report generation failed");
+      const { buildErrorPageUrl } = await import("../../lib/api/error");
+      router.push(
+        buildErrorPageUrl({ status: 0, type: "network", message: "Could not reach the server. Check your connection." }, pathname),
+      );
     } finally {
       setLoading(false);
     }

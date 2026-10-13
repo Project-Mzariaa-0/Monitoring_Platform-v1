@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from src.utils.label_aliases import normalize_class_name
+from src.state_machine.confidence_policy import evaluate_task_signals
+
 
 class TaskStateMachine:
     def __init__(self, thresholds: dict):
@@ -29,7 +32,6 @@ class TaskStateMachine:
     }
 
     def update(self, session_id: str, cow_position: int, detections: list) -> list[dict]:
-        class_names = {getattr(detection, "class_name", "") for detection in detections}
         events: list[dict] = []
         key = (session_id, cow_position)
         state = self.active_tasks.get(key, {"completed": set(), "active": False, "start_times": {}, "first_seen": {}})
@@ -37,7 +39,12 @@ class TaskStateMachine:
         now = datetime.now(timezone.utc).isoformat()
 
         for task_id, required_signals in self.TASK_SIGNALS.items():
-            signals_present = required_signals.issubset(class_names)
+            signals_present = evaluate_task_signals(
+                task_id,
+                required_signals,
+                detections,
+                self.thresholds,
+            ).accepted
 
             if signals_present and task_id not in state["completed"]:
                 if task_id not in state["first_seen"]:
@@ -47,23 +54,24 @@ class TaskStateMachine:
                 start_time = first_seen.get(task_id) or now
                 confidence = self._confidence_for_task(task_id)
 
-                events.append(self._event(session_id, cow_position, task_id, "completed", confidence, start_time, now))
+                events.append(self._event(session_id, cow_position, task_id, "completed", confidence, 100.0, start_time, now))
                 state["completed"].add(task_id)
                 state["active"] = True
 
+        class_names = {normalize_class_name(getattr(detection, "class_name", "")) for detection in detections}
         if "teat_cups_attached" not in class_names and state["active"] and self.process_end_task not in state["completed"]:
             missed_confidence = self.thresholds.get("default_unverifiable_confidence", 0.5)
             if self.process_start_task not in state["completed"]:
-                events.append(self._event(session_id, cow_position, self.process_start_task, "missed", missed_confidence, now, now))
+                events.append(self._event(session_id, cow_position, self.process_start_task, "missed", missed_confidence, 0.0, now, now))
             if "TASK-03" in state["completed"] and "TASK-05" not in state["completed"]:
-                events.append(self._event(session_id, cow_position, self.process_end_task, "missed", missed_confidence, now, now))
+                events.append(self._event(session_id, cow_position, self.process_end_task, "missed", missed_confidence, 0.0, now, now))
             state["active"] = False
 
         self.active_tasks[key] = state
 
         return events
 
-    def _event(self, session_id: str, cow_position: int, task_id: str, status: str, confidence: float, start_time: str, end_time: str) -> dict:
+    def _event(self, session_id: str, cow_position: int, task_id: str, status: str, confidence: float, completion_percentage: float, start_time: str, end_time: str) -> dict:
         duration = 0
         if start_time and end_time and start_time != end_time:
             try:
@@ -78,6 +86,7 @@ class TaskStateMachine:
             "session_id": session_id,
             "cow_position": cow_position,
             "confidence_score": confidence,
+            "completion_percentage": float(completion_percentage),
             "status": status,
             "detected_start_time": start_time,
             "detected_end_time": end_time,

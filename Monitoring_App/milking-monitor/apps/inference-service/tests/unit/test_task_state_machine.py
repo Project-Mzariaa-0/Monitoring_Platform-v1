@@ -45,6 +45,24 @@ class TestTaskStateMachine:
         task_event = events[0]
         assert task_event["confidence_score"] == 0.82
 
+    def test_low_confidence_signals_do_not_complete_task(self, sm):
+        detections = [
+            type("Detection", (), {"class_name": "person", "confidence": 0.49})(),
+            type("Detection", (), {"class_name": "spray_bottle", "confidence": 0.99})(),
+        ]
+
+        assert sm.update("s1", 1, detections) == []
+
+    def test_high_confidence_signals_complete_task(self, sm):
+        detections = [
+            type("Detection", (), {"class_name": "person", "confidence": 0.80})(),
+            type("Detection", (), {"class_name": "spray_bottle", "confidence": 0.75})(),
+        ]
+
+        events = sm.update("s1", 1, detections)
+
+        assert events[0]["task_id"] == "TASK-01"
+
     def test_no_events_when_no_signals_match(self, sm):
         detections = [type("Detection", (), {"class_name": "cat"})()]
         events = sm.update("s1", 1, detections)
@@ -57,3 +75,21 @@ class TestTaskStateMachine:
         task_ids = [e["task_id"] for e in events]
         assert "TASK-06" in task_ids
         assert events[task_ids.index("TASK-06")]["status"] == "missed"
+
+    def test_raw_roboflow_class_names_are_normalized_to_task_signals(self, sm):
+        detections = [
+            type("Detection", (), {"class_name": "person"})(),
+            type("Detection", (), {"class_name": "pipe_sprayer"})(),
+            type("Detection", (), {"class_name": "stripping_cup"})(),
+            type("Detection", (), {"class_name": "teat_cup_on"})(),
+            type("Detection", (), {"class_name": "teat_cup_off"})(),
+            type("Detection", (), {"class_name": "dip_applicator"})(),
+        ]
+        events = sm.update("s1", 1, detections)
+        task_ids = [e["task_id"] for e in events]
+        assert "TASK-01" in task_ids
+        assert "TASK-02" in task_ids
+        assert "TASK-03" in task_ids
+        assert "TASK-04" in task_ids
+        assert "TASK-05" in task_ids
+        assert "TASK-06" in task_ids

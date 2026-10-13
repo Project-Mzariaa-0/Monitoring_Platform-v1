@@ -1,10 +1,14 @@
 import { rateLimit } from "../../../../../lib/security/rate-limit";
 import { updateSessionStatus } from "../../../../../lib/data/store";
+import { getApiSession, requireApiSessionOrServiceToken } from "../../../../../lib/auth/api";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
 ) {
+  const unauthorized = await requireApiSessionOrServiceToken(request);
+  if (unauthorized) return unauthorized;
+
   const clientId = request.headers.get("x-forwarded-for") ?? "anonymous";
   const limit = rateLimit(`sessions:status:${clientId}`, 60, 60_000);
 
@@ -24,7 +28,9 @@ export async function POST(
   }
 
   try {
-    const updated = await updateSessionStatus(sessionId, body.status);
+    const session = await getApiSession();
+    const actorId = (session?.user as { id?: string } | undefined)?.id ?? "inference-service";
+    const updated = await updateSessionStatus(sessionId, body.status, actorId);
     if (!updated) {
       return Response.json({ ok: false, error: "Session not found" }, { status: 404 });
     }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { redirectOnApiError } from "../../lib/api/error";
 
 type TaskEvent = {
   id: string;
@@ -19,6 +21,8 @@ type Props = {
 };
 
 export default function OverrideModal({ open, sessionId, taskEvent, onClose, onSaved }: Props) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [overrideStatus, setOverrideStatus] = useState<"completed" | "missed" | "anomaly_flagged" | "unverifiable">("unverifiable");
   const [reason, setReason] = useState("");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -70,24 +74,50 @@ export default function OverrideModal({ open, sessionId, taskEvent, onClose, onS
   const taskEventStatus = currentTaskEvent.override_status ?? currentTaskEvent.status;
 
   async function saveOverride() {
-    const response = await fetch(`/api/task-events/${taskEventId}/override`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        override_status: overrideStatus,
-        reason,
-        actor_id: sessionId,
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`/api/task-events/${taskEventId}/override`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          override_status: overrideStatus,
+          reason,
+        }),
+      });
+    } catch {
+      const { buildErrorPageUrl } = await import("../../lib/api/error");
+      onClose();
+      router.push(
+        buildErrorPageUrl({ status: 0, type: "network", message: "Could not reach the server. Check your connection." }, pathname),
+      );
+      return;
+    }
 
-    const payload = await response.json();
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const { buildErrorPageUrl, shouldRedirectToErrorPage, typeForStatus } = await import("../../lib/api/error");
+      if (shouldRedirectToErrorPage(response.status)) {
+        onClose();
+        router.push(
+          buildErrorPageUrl(
+            {
+              status: response.status,
+              type: typeForStatus(response.status),
+              message: (payload as { error?: string } | null)?.error ?? "Override failed",
+            },
+            pathname,
+          ),
+        );
+        return;
+      }
+    }
     if (response.ok) {
-      setStatusMessage(`Saved override for ${payload.data.task_id}`);
+      setStatusMessage(`Saved override for ${(payload as { data?: { task_id?: string } } | null)?.data?.task_id}`);
       onSaved();
       return;
     }
 
-    setStatusMessage(payload.error ?? "Override failed");
+    setStatusMessage((payload as { error?: string } | null)?.error ?? "Override failed");
   }
 
   return (

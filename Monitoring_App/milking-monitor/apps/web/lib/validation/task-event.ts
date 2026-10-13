@@ -6,7 +6,6 @@ const TASK_STATUSES = ["completed", "missed", "anomaly_flagged", "unverifiable"]
 export const overrideTaskEventSchema = z.object({
   override_status: z.enum(TASK_STATUSES),
   reason: z.string().min(1).max(1000),
-  actor_id: z.string().uuid(),
 });
 
 export const ingestTaskEventSchema = z.object({
@@ -15,6 +14,7 @@ export const ingestTaskEventSchema = z.object({
   task_id: z.enum(TASK_IDS),
   status: z.enum(TASK_STATUSES),
   confidence_score: z.number().min(0).max(1).optional(),
+  completion_percentage: z.number().min(0).max(100).optional(),
   detected_start_time: z.string().datetime().nullable().optional(),
   detected_end_time: z.string().datetime().nullable().optional(),
   duration_seconds: z.number().int().min(0).optional(),

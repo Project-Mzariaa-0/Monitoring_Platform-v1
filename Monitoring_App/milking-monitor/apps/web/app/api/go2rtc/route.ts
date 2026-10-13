@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireApiSession } from "../../../lib/auth/api";
 
 const GO2RTC_URL = process.env.GO2RTC_URL || "http://localhost:1984";
 
 export async function GET(request: NextRequest) {
+  const unauthorized = await requireApiSession();
+  if (unauthorized) return unauthorized;
+
   const { searchParams } = new URL(request.url);
   const src = searchParams.get("src") || "camera1";
 
@@ -24,8 +28,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       name: src,
-      source: stream,
-      api_url: GO2RTC_URL,
       webrtc_url: `${GO2RTC_URL}/api/webrtc?src=${src}`,
       mse_url: `${GO2RTC_URL}/api/stream.mp4?src=${src}`,
       mjpeg_url: `${GO2RTC_URL}/api/stream.mjpeg?src=${src}`,

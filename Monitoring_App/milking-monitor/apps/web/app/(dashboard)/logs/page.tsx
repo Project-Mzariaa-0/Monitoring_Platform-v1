@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listSessions, getSessionDetails } from "../../../lib/data/store";
+import { formatInMorocco } from "../../../lib/time/morocco";
 import { TASK_LABELS } from "../../../lib/constants";
 
 export default async function LogsPage() {
@@ -75,7 +76,7 @@ export default async function LogsPage() {
                   </td>
                   <td>COW-{String(row.cow_position).padStart(3, "0")}</td>
                   <td>{row.task_label}</td>
-                  <td>{new Date(row.timestamp).toLocaleString()}</td>
+                  <td>{formatInMorocco(row.timestamp)}</td>
                   <td>{row.employee_name}</td>
                   <td>
                     <Link className="button button-secondary" href={`/sessions/${row.session_id}`}>

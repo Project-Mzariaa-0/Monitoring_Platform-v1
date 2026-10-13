@@ -35,6 +35,21 @@ def _parse_end_time(end_time: str | None) -> datetime | None:
         return None
 
 
+def _duration_seconds(start_time: str, end_time: str) -> int:
+    try:
+        t_start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        t_end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+        return max(0, int((t_end - t_start).total_seconds()))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _majority_position(counts: dict[int, int]) -> int:
+    if not counts:
+        return 1
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
 @dataclass
 class SessionRunner:
     session_id: str
@@ -71,7 +86,10 @@ class SessionRunner:
         finally:
             if publisher:
                 publisher.close()
-            logger.info("Session %s: pipeline stopped after %d frames", self.session_id, frame_count)
+            if reader:
+                logger.info("Session %s: stream health=%s", self.session_id, reader.health.snapshot())
+            total_frames = reader.health.snapshot().get("frames_received", frame_count) if reader else frame_count
+            logger.info("Session %s: pipeline stopped after %d frames", self.session_id, total_frames)
             if self.on_stop:
                 try:
                     self.on_stop(self.session_id)
@@ -149,6 +167,16 @@ class SessionRunner:
         # Track cow process boundaries based on hybrid task detections
         cow_process_started: dict[int, bool] = {1: False, 2: False}
 
+        # Track which position each task was detected at (majority vote on publish)
+        task_position_counts: dict[str, dict[int, int]] = {
+            "TASK-01": {}, "TASK-02": {}, "TASK-03": {},
+            "TASK-04": {}, "TASK-05": {}, "TASK-06": {},
+        }
+        # Tasks already published during the session (incremental persistence so a
+        # crash/kill after the loop can no longer wipe the session's task data)
+        published_tasks: set[str] = set()
+        PUBLISH_FRAME_THRESHOLD = 25  # ~5s of detections at 5 FPS
+
         try:
             for frame_index, frame in reader.read_frames():
                 if self.stop_event.is_set():
@@ -175,6 +203,8 @@ class SessionRunner:
                 if detection:
                     # Record the prediction
                     task_predictions[detection.task_id].append((now_iso, detection.confidence))
+                    position_counts = task_position_counts[detection.task_id]
+                    position_counts[cow_position] = position_counts.get(cow_position, 0) + 1
                     frame_log.append({
                         "frame": frame_count,
                         "task_id": detection.task_id,
@@ -184,6 +214,32 @@ class SessionRunner:
                     })
                     if frame_count % 30 == 0:
                         logger.info("Session %s: frame %d detected %s (%.2f)", self.session_id, frame_count, detection.task_id, detection.confidence)
+
+                    # Publish the task event as soon as it has enough evidence so data
+                    # is persisted even if the session is killed before final analysis
+                    if detection.task_id not in published_tasks and len(task_predictions[detection.task_id]) >= PUBLISH_FRAME_THRESHOLD:
+                        published_tasks.add(detection.task_id)
+                        preds = task_predictions[detection.task_id]
+                        avg_confidence = sum(c for _, c in preds) / len(preds)
+                        start_time = preds[0][0]
+                        end_time = preds[-1][0]
+                        duration = _duration_seconds(start_time, end_time)
+                        event = {
+                            "session_id": self.session_id,
+                            "task_id": detection.task_id,
+                            "cow_position": _majority_position(position_counts),
+                            "status": "completed",
+                            "completion_percentage": min(100.0, PUBLISH_FRAME_THRESHOLD * 100.0 / max(1, frame_count + 1)),
+                            "confidence_score": avg_confidence,
+                            "detected_start_time": start_time,
+                            "detected_end_time": end_time,
+                            "duration_seconds": duration,
+                        }
+                        publisher.publish(build_task_event(event))
+                        logger.info(
+                            "Session %s: %s published early (completed, %d detections) pos=%d",
+                            self.session_id, detection.task_id, len(preds), event["cow_position"],
+                        )
 
                     # Drive cow process boundaries from task detections
                     if detection.task_id == "TASK-03" and not cow_process_started.get(cow_position, False):
@@ -235,6 +291,20 @@ class SessionRunner:
         missed_tasks: set[str] = set()
 
         for task_id, predictions in task_predictions.items():
+            position = _majority_position(task_position_counts.get(task_id) or {})
+
+            if task_id in published_tasks:
+                # Already persisted incrementally during the session — nothing to send
+                detected_frames = len(predictions)
+                ratio = detected_frames / frame_count
+                avg_confidence = sum(c for _, c in predictions) / len(predictions) if predictions else 0.0
+                logger.info(
+                    "Session %s: %s already published (%d/%d frames, %.1f%%, avg_conf=%.2f, pos=%d)",
+                    self.session_id, task_id, detected_frames, frame_count, ratio * 100, avg_confidence, position,
+                )
+                completed_tasks.add(task_id)
+                continue
+
             if not predictions:
                 # Task never detected at all — publish missed event so it shows in web app
                 missed_tasks.add(task_id)
@@ -242,15 +312,16 @@ class SessionRunner:
                 event = {
                     "session_id": self.session_id,
                     "task_id": task_id,
-                    "cow_position": 1,
+                    "cow_position": position,
                     "status": "missed",
+                    "completion_percentage": 0.0,
                     "confidence_score": 0.0,
                     "detected_start_time": now,
                     "detected_end_time": now,
                     "duration_seconds": 0,
                 }
                 publisher.publish(build_task_event(event))
-                logger.info("Session %s: %s NEVER DETECTED -> missed", self.session_id, task_id)
+                logger.info("Session %s: %s NEVER DETECTED -> missed (pos=%d)", self.session_id, task_id, position)
                 continue
 
             # Calculate detection ratio: frames where task was detected / total frames
@@ -270,19 +341,14 @@ class SessionRunner:
                 completed_tasks.add(task_id)
                 start_time = predictions[0][0]
                 end_time = predictions[-1][0]
-                # Calculate duration from first to last detection
-                try:
-                    t_start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                    t_end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
-                    duration = max(0, int((t_end - t_start).total_seconds()))
-                except (ValueError, TypeError):
-                    duration = 0
+                duration = _duration_seconds(start_time, end_time)
 
                 event = {
                     "session_id": self.session_id,
                     "task_id": task_id,
-                    "cow_position": 1,
+                    "cow_position": position,
                     "status": "completed",
+                    "completion_percentage": min(100.0, max(0.0, ratio * 100.0)),
                     "confidence_score": avg_confidence,
                     "detected_start_time": start_time,
                     "detected_end_time": end_time,
@@ -290,8 +356,8 @@ class SessionRunner:
                 }
                 publisher.publish(build_task_event(event))
                 logger.info(
-                    "Session %s: %s COMPLETED (%.1f%% >= 18%%) avg_conf=%.2f dur=%ds",
-                    self.session_id, task_id, ratio * 100, avg_confidence, duration,
+                    "Session %s: %s COMPLETED (%.1f%% >= threshold) avg_conf=%.2f dur=%ds pos=%d",
+                    self.session_id, task_id, ratio * 100, avg_confidence, duration, position,
                 )
             else:
                 # Task below threshold -> mark as missed
@@ -300,8 +366,9 @@ class SessionRunner:
                 event = {
                     "session_id": self.session_id,
                     "task_id": task_id,
-                    "cow_position": 1,
+                    "cow_position": position,
                     "status": "missed",
+                    "completion_percentage": min(100.0, max(0.0, ratio * 100.0)),
                     "confidence_score": avg_confidence,
                     "detected_start_time": now,
                     "detected_end_time": now,
@@ -309,8 +376,8 @@ class SessionRunner:
                 }
                 publisher.publish(build_task_event(event))
                 logger.info(
-                    "Session %s: %s MISSED (%.1f%% < 18%% threshold)",
-                    self.session_id, task_id, ratio * 100,
+                    "Session %s: %s MISSED (%.1f%% < threshold) pos=%d",
+                    self.session_id, task_id, ratio * 100, position,
                 )
 
         logger.info(

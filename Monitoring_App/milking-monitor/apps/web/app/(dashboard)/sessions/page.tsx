@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listSessions, getEmployeeAnalytics } from "../../../lib/data/store";
+import { formatInMorocco, formatTimeInMorocco } from "../../../lib/time/morocco";
 
 export default async function SessionsPage() {
   const [sessions, employeeAnalytics] = await Promise.all([
@@ -63,10 +64,10 @@ export default async function SessionsPage() {
                     <td>{s.employee_name}</td>
                     <td>
                       <div style={{ fontSize: 13 }}>
-                        {new Date(s.scheduled_start_time).toLocaleDateString()}
+                        {formatInMorocco(s.scheduled_start_time, { dateStyle: "medium", timeStyle: undefined } as Intl.DateTimeFormatOptions)}
                       </div>
                       <div className="muted" style={{ fontSize: 12 }}>
-                        {new Date(s.scheduled_start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {formatTimeInMorocco(s.scheduled_start_time)} Morocco
                       </div>
                     </td>
                     <td>

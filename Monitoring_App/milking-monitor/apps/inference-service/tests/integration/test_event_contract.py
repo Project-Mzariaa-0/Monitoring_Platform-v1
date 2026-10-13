@@ -8,6 +8,7 @@ def test_task_event_builder_returns_payload():
         "cow_position": 1,
         "confidence_score": 0.95,
         "status": "completed",
+        "completion_percentage": 67.5,
         "detected_start_time": "2026-07-03T12:00:00Z",
         "detected_end_time": "2026-07-03T12:00:10Z",
     }
@@ -18,6 +19,7 @@ def test_task_event_builder_returns_payload():
     assert result["cow_position"] == 1
     assert result["confidence_score"] == 0.95
     assert result["status"] == "completed"
+    assert result["completion_percentage"] == 67.5
     assert result["detected_start_time"] == "2026-07-03T12:00:00Z"
     assert result["detected_end_time"] == "2026-07-03T12:00:10Z"
 

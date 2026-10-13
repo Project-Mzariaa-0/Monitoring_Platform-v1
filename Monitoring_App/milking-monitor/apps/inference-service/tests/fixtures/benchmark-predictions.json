@@ -1,0 +1,14 @@
+[
+  {
+    "sample_id": "sample-001",
+    "expected_task": "TASK-01",
+    "predicted_task": "TASK-01",
+    "confidence": 0.94
+  },
+  {
+    "sample_id": "sample-002",
+    "expected_task": "TASK-03",
+    "predicted_task": "TASK-04",
+    "confidence": 0.61
+  }
+]

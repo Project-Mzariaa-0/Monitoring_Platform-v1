@@ -2,6 +2,7 @@ import { desc, eq, inArray, and, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { sessions, cowProcesses, taskEvents, reports, auditLog, supervisors, employees } from "../db/schema";
 import { TASK_LABELS } from "../constants";
+import { isDuplicateTaskEvent } from "./event-dedupe";
 
 export type SessionStatus = "scheduled" | "active" | "completed" | "ended_early";
 
@@ -39,6 +40,7 @@ export type TaskEventRecord = {
   detected_end_time: string | null;
   duration_seconds: number;
   status: "completed" | "missed" | "anomaly_flagged" | "unverifiable";
+  completion_percentage: number;
   override_status?: "completed" | "missed" | "anomaly_flagged" | "unverifiable";
   override_reason?: string;
   overridden_by?: string;
@@ -69,6 +71,58 @@ function toISO(value: Date | string | null): string | null {
   return value.toISOString();
 }
 
+function collectErrorMessages(error: unknown): string[] {
+  const messages: string[] = [];
+  let current: any = error;
+  let depth = 0;
+  while (current instanceof Error && depth < 5) {
+    messages.push(String(current.message ?? "").toLowerCase());
+    current = current.cause;
+    depth += 1;
+  }
+  return messages;
+}
+
+function isMissingCompletionPercentageColumn(error: unknown): boolean {
+  const messages = collectErrorMessages(error);
+  return messages.some(
+    (message) =>
+      message.includes("completion_percentage") &&
+      (message.includes("does not exist") ||
+        message.includes("unknown column") ||
+        message.includes("no such column")),
+  );
+}
+
+/**
+ * Close any `in_progress` cow processes belonging to already-`completed`
+ * sessions (e.g. via the 30-min auto-complete). Without this, completed
+ * sessions keep showing cows as `in_progress` with N/A end time.
+ */
+async function finalizeStaleCowProcesses(): Promise<void> {
+  try {
+    await db.execute(sql`
+      update cow_processes cp
+      set
+        detected_end_time = coalesce(cp.detected_end_time, s.estimated_end_time, now()),
+        overall_status = case
+          when exists (
+            select 1 from task_events te
+            where te.cow_process_id = cp.id and (te.status = 'missed' or te.override_status = 'missed')
+          ) then 'completed_with_missed_tasks'
+          else 'completed'
+        end,
+        updated_at = now()
+      from sessions s
+      where cp.session_id = s.id
+        and s.status in ('completed', 'ended_early')
+        and cp.overall_status = 'in_progress'
+    `);
+  } catch {
+    /* table may not exist yet */
+  }
+}
+
 export async function listSessions(): Promise<SessionRecord[]> {
   const now = new Date().toISOString();
 
@@ -77,6 +131,8 @@ export async function listSessions(): Promise<SessionRecord[]> {
     .update(sessions)
     .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
     .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+
+  await finalizeStaleCowProcesses();
 
   const rows = await db.select().from(sessions).orderBy(desc(sessions.created_at));
   return rows.map((r) => ({
@@ -142,7 +198,8 @@ export async function getSession(sessionId: string): Promise<SessionRecord | nul
     await db
       .update(sessions)
       .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
-      .where(and(eq(sessions.id, sessionId), inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+      .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+    await finalizeStaleCowProcesses();
   } catch { /* table may not exist */ }
 
   let row: any = null;
@@ -193,7 +250,34 @@ export async function getSessionDetails(
   const cowIds = cowProcessesRecords.map((c) => c.id);
   let taskRows: any[] = [];
   if (cowIds.length > 0) {
-    try { taskRows = await db.select().from(taskEvents).where(inArray(taskEvents.cow_process_id, cowIds)).orderBy(taskEvents.created_at); } catch { /* table may not exist */ }
+    try {
+      taskRows = await db.select().from(taskEvents).where(inArray(taskEvents.cow_process_id, cowIds)).orderBy(taskEvents.created_at);
+    } catch (error) {
+      if (isMissingCompletionPercentageColumn(error)) {
+        const cowIdList = sql.join(cowIds.map((id) => sql`${id}::uuid`), sql`, `);
+        const fallback = await db.execute(sql`
+          select
+            id,
+            cow_process_id,
+            task_id,
+            detected_start_time,
+            detected_end_time,
+            duration_seconds,
+            status,
+            override_status,
+            override_reason,
+            overridden_by,
+            overridden_at,
+            created_at
+          from task_events
+          where cow_process_id in (${cowIdList})
+          order by created_at
+        `);
+        taskRows = (fallback as { rows?: any[] }).rows ?? [];
+      } else {
+        console.error(`[store] Failed to load task events for session ${sessionId}:`, error);
+      }
+    }
   }
   const taskEventsRecords: TaskEventRecord[] = taskRows.map((r) => ({
     id: r.id,
@@ -203,6 +287,7 @@ export async function getSessionDetails(
     detected_end_time: toISO(r.detected_end_time),
     duration_seconds: Number(r.duration_seconds),
     status: r.status as TaskEventRecord["status"],
+    completion_percentage: Number(r.completion_percentage ?? 0),
     override_status: (r.override_status as TaskEventRecord["override_status"]) ?? undefined,
     override_reason: r.override_reason ?? undefined,
     overridden_by: r.overridden_by ?? undefined,
@@ -317,26 +402,33 @@ export async function updateSessionEmployee(
   employeeName: string,
   actorId: string,
 ): Promise<SessionRecord | null> {
-  const [updated] = await db
-    .update(sessions)
-    .set({
-      employee_id: employeeId,
-      employee_name: employeeName,
-      updated_at: new Date(),
-    })
-    .where(eq(sessions.id, sessionId))
-    .returning();
+  const updated = await db.transaction(async (tx) => {
+    const [updatedSession] = await tx
+      .update(sessions)
+      .set({
+        employee_id: employeeId,
+        employee_name: employeeName,
+        updated_at: new Date(),
+      })
+      .where(eq(sessions.id, sessionId))
+      .returning();
+
+    if (!updatedSession) return null;
+
+    await tx.insert(auditLog).values({
+      entity_type: "Session",
+      entity_id: sessionId,
+      action: "employee_reassigned",
+      actor_id: actorId,
+      reason: null,
+      details: { employee_id: employeeId, employee_name: employeeName },
+      created_at: new Date(),
+    });
+
+    return updatedSession;
+  });
 
   if (!updated) return null;
-
-  await db.insert(auditLog).values({
-    entity_type: "Session",
-    entity_id: sessionId,
-    action: "employee_reassigned",
-    actor_id: actorId,
-    reason: null,
-    created_at: new Date(),
-  });
 
   return {
     id: updated.id,
@@ -359,12 +451,98 @@ export async function updateSessionEmployee(
 export async function updateSessionStatus(
   sessionId: string,
   status: string,
+  actorId = "inference-service",
 ): Promise<SessionRecord | null> {
-  const [updated] = await db
-    .update(sessions)
-    .set({ status, updated_at: new Date() })
-    .where(eq(sessions.id, sessionId))
-    .returning();
+  const updated = await db.transaction(async (tx) => {
+    const [session] = await tx
+      .select({ status: sessions.status })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+
+    const setValues: Record<string, unknown> = { status, updated_at: new Date() };
+    if (status === "completed" || status === "ended_early") {
+      setValues.actual_end_time = new Date();
+    }
+
+    const [updatedSession] = await tx
+      .update(sessions)
+      .set(setValues)
+      .where(eq(sessions.id, sessionId))
+      .returning();
+
+    if (!updatedSession) return null;
+
+    if (status === "completed" || status === "ended_early") {
+      const sessionCows = await tx
+        .select()
+        .from(cowProcesses)
+        .where(eq(cowProcesses.session_id, sessionId));
+      const cowIds = sessionCows.map((c) => c.id);
+      let existingTasks: { cow_process_id: string; task_id: string; status: string }[] = [];
+      if (cowIds.length > 0) {
+        existingTasks = await tx
+          .select({ cow_process_id: taskEvents.cow_process_id, task_id: taskEvents.task_id, status: taskEvents.status })
+          .from(taskEvents)
+          .where(inArray(taskEvents.cow_process_id, cowIds));
+      }
+      const seen = new Set(existingTasks.map((t) => `${t.cow_process_id}:${t.task_id}`));
+      const now = new Date();
+      for (const cow of sessionCows) {
+        let missedCount = 0;
+        // Only backfill missed tasks for cows that produced at least one real
+        // task event. A lone "started" boundary signal with zero task events
+        // is usually a false detection — fabricating 6x N/A rows for it
+        // produces the duplicate Row-2 tables. Untouched positions are simply
+        // closed below with no fake rows.
+        const cowHadEvents = existingTasks.some((t) => t.cow_process_id === cow.id);
+        if (cowHadEvents) {
+          for (const taskId of Object.keys(TASK_LABELS)) {
+            if (!seen.has(`${cow.id}:${taskId}`)) {
+              missedCount += 1;
+              await tx.insert(taskEvents).values({
+                cow_process_id: cow.id,
+                task_id: taskId,
+                detected_start_time: null,
+                detected_end_time: null,
+                duration_seconds: 0,
+                status: "missed",
+                confidence_score: 0,
+                completion_percentage: 0,
+                override_status: null,
+                override_reason: null,
+                overridden_by: null,
+                overridden_at: null,
+                created_at: now,
+              });
+            }
+          }
+        }
+        const cowTasks = existingTasks.filter((t) => t.cow_process_id === cow.id);
+        const hasMissed = cowTasks.some((t) => t.status === "missed") || missedCount > 0;
+        await tx
+          .update(cowProcesses)
+          .set({
+            detected_end_time: cow.detected_end_time ?? now,
+            overall_status: hasMissed ? "completed_with_missed_tasks" : "completed",
+            updated_at: now,
+          })
+          .where(eq(cowProcesses.id, cow.id));
+      }
+    }
+
+    await tx.insert(auditLog).values({
+      entity_type: "Session",
+      entity_id: sessionId,
+      action: "status_changed",
+      actor_id: actorId,
+      reason: null,
+      details: { previous_status: session?.status ?? null, status },
+      created_at: new Date(),
+    });
+
+    return updatedSession;
+  });
 
   if (!updated) return null;
 
@@ -421,6 +599,7 @@ export async function ingestTaskEvent(input: {
   task_id: TaskEventRecord["task_id"];
   status: TaskEventRecord["status"];
   confidence_score?: number;
+  completion_percentage?: number;
   detected_start_time?: string | null;
   detected_end_time?: string | null;
   duration_seconds?: number;
@@ -432,39 +611,149 @@ export async function ingestTaskEvent(input: {
     .limit(1);
 
   const cow = cowRow[0];
-  if (!cow) return null;
+  if (!cow) {
+    console.warn(
+      `[store] Task event dropped: no cow process for session=${input.session_id} position=${input.cow_position} task=${input.task_id}`,
+    );
+    return null;
+  }
 
   const detectedStart = input.detected_start_time ?? null;
   const detectedEnd = input.detected_end_time ?? null;
 
-  const [inserted] = await db
-    .insert(taskEvents)
-    .values({
-      cow_process_id: cow.id,
-      task_id: input.task_id,
-      detected_start_time: detectedStart ? new Date(detectedStart) : null,
-      detected_end_time: detectedEnd ? new Date(detectedEnd) : null,
-      duration_seconds: input.duration_seconds ?? 0,
-      status: input.status,
-      override_status: null,
-      override_reason: null,
-      overridden_by: null,
-      overridden_at: null,
-      created_at: new Date(),
-    })
-    .returning();
+  const existingTaskEvents = await db
+    .select()
+    .from(taskEvents)
+    .where(eq(taskEvents.cow_process_id, cow.id))
+    .orderBy(taskEvents.created_at);
+
+  const duplicateCandidate = existingTaskEvents.find((row) =>
+    isDuplicateTaskEvent(
+      {
+        session_id: input.session_id,
+        cow_position: input.cow_position,
+        task_id: input.task_id,
+        status: input.status,
+        detected_start_time: detectedStart,
+        detected_end_time: detectedEnd,
+      },
+      {
+        session_id: input.session_id,
+        cow_position: input.cow_position,
+        task_id: row.task_id,
+        status: row.status,
+        detected_start_time: toISO(row.detected_start_time),
+        detected_end_time: toISO(row.detected_end_time),
+      },
+    ),
+  );
+
+  if (duplicateCandidate) {
+    return {
+      id: duplicateCandidate.id,
+      cow_process_id: duplicateCandidate.cow_process_id,
+      task_id: duplicateCandidate.task_id as TaskEventRecord["task_id"],
+      detected_start_time: toISO(duplicateCandidate.detected_start_time),
+      detected_end_time: toISO(duplicateCandidate.detected_end_time),
+      duration_seconds: Number(duplicateCandidate.duration_seconds),
+      status: duplicateCandidate.status as TaskEventRecord["status"],
+      completion_percentage: Number(duplicateCandidate.completion_percentage ?? 0),
+      override_status: (duplicateCandidate.override_status as TaskEventRecord["override_status"]) ?? undefined,
+      override_reason: duplicateCandidate.override_reason ?? undefined,
+      overridden_by: duplicateCandidate.overridden_by ?? undefined,
+      overridden_at: duplicateCandidate.overridden_at ? toISO(duplicateCandidate.overridden_at) ?? undefined : undefined,
+    };
+  }
+
+  let inserted: any;
+  try {
+    [inserted] = await db
+      .insert(taskEvents)
+      .values({
+        cow_process_id: cow.id,
+        task_id: input.task_id,
+        detected_start_time: detectedStart ? new Date(detectedStart) : null,
+        detected_end_time: detectedEnd ? new Date(detectedEnd) : null,
+        duration_seconds: input.duration_seconds ?? 0,
+        status: input.status,
+        confidence_score: Number(input.confidence_score ?? 0),
+        completion_percentage: Number(input.completion_percentage ?? 0),
+        override_status: null,
+        override_reason: null,
+        overridden_by: null,
+        overridden_at: null,
+        created_at: new Date(),
+      })
+      .returning();
+  } catch (error) {
+    if (!isMissingCompletionPercentageColumn(error)) {
+      throw error;
+    }
+
+    const fallbackInserted = await db.execute(sql`
+      insert into task_events (
+        cow_process_id,
+        task_id,
+        detected_start_time,
+        detected_end_time,
+        duration_seconds,
+        status,
+        confidence_score,
+        override_status,
+        override_reason,
+        overridden_by,
+        overridden_at,
+        created_at
+      ) values (
+        ${cow.id}::uuid,
+        ${input.task_id},
+        ${detectedStart ? new Date(detectedStart) : null},
+        ${detectedEnd ? new Date(detectedEnd) : null},
+        ${input.duration_seconds ?? 0},
+        ${input.status},
+        ${Number(input.confidence_score ?? 0)},
+        ${null},
+        ${null},
+        ${null},
+        ${null},
+        ${new Date()}
+      )
+      returning
+        id,
+        cow_process_id,
+        task_id,
+        detected_start_time,
+        detected_end_time,
+        duration_seconds,
+        status,
+        override_status,
+        override_reason,
+        overridden_by,
+        overridden_at
+    `);
+      inserted = (fallbackInserted as { rows?: any[] }).rows?.[0];
+  }
 
   if (!inserted) return null;
 
-  if (input.status === "completed") {
-    if (input.task_id === "TASK-03" && !cow.detected_start_time) {
-      const startTime = detectedStart ? new Date(detectedStart) : new Date();
-      await db.update(cowProcesses).set({ detected_start_time: startTime, overall_status: "in_progress", updated_at: new Date() }).where(eq(cowProcesses.id, cow.id));
-    }
-    if (input.task_id === "TASK-05") {
-      const endTime = detectedEnd ? new Date(detectedEnd) : new Date();
-      await db.update(cowProcesses).set({ detected_end_time: endTime, overall_status: "completed", updated_at: new Date() }).where(eq(cowProcesses.id, cow.id));
-    }
+  // Cow process boundaries: TASK-03 (attachment) opens, TASK-05/06 closes.
+  // Previously only `completed` closed the process, so any missed/anomaly run
+  // left cows stuck at `in_progress` with N/A end time forever.
+  if (input.task_id === "TASK-03" && !cow.detected_start_time) {
+    const startTime = detectedStart ? new Date(detectedStart) : new Date();
+    await db.update(cowProcesses).set({ detected_start_time: startTime, overall_status: "in_progress", updated_at: new Date() }).where(eq(cowProcesses.id, cow.id));
+  }
+  if (input.task_id === "TASK-01" && !cow.detected_start_time) {
+    const startTime = detectedStart ? new Date(detectedStart) : new Date();
+    await db.update(cowProcesses).set({ detected_start_time: startTime, overall_status: "in_progress", updated_at: new Date() }).where(eq(cowProcesses.id, cow.id));
+  }
+  if (input.task_id === "TASK-05" || input.task_id === "TASK-06") {
+    const endTime = detectedEnd ? new Date(detectedEnd) : new Date();
+    const closedStatus = input.status === "completed" ? "completed" : "completed_with_missed_tasks";
+    await db
+      .update(cowProcesses)
+      .set({ detected_end_time: endTime, overall_status: closedStatus, updated_at: new Date() })
+      .where(eq(cowProcesses.id, cow.id));
   }
 
   return {
@@ -475,6 +764,7 @@ export async function ingestTaskEvent(input: {
     detected_end_time: toISO(inserted.detected_end_time),
     duration_seconds: Number(inserted.duration_seconds),
     status: inserted.status as TaskEventRecord["status"],
+    completion_percentage: Number(inserted.completion_percentage ?? 0),
     override_status: (inserted.override_status as TaskEventRecord["override_status"]) ?? undefined,
     override_reason: inserted.override_reason ?? undefined,
     overridden_by: inserted.overridden_by ?? undefined,
@@ -488,27 +778,44 @@ export async function overrideTaskEvent(
   reason: string,
   actorId: string,
 ): Promise<TaskEventRecord | null> {
-  const [updated] = await db
-    .update(taskEvents)
-    .set({
-      override_status: overrideStatus,
-      override_reason: reason,
-      overridden_by: actorId,
-      overridden_at: new Date(),
-    })
-    .where(eq(taskEvents.id, taskEventId))
-    .returning();
+  const updated = await db.transaction(async (tx) => {
+    const [previousEvent] = await tx
+      .select({ status: taskEvents.status, override_status: taskEvents.override_status })
+      .from(taskEvents)
+      .where(eq(taskEvents.id, taskEventId))
+      .limit(1);
+
+    const [updatedEvent] = await tx
+      .update(taskEvents)
+      .set({
+        override_status: overrideStatus,
+        override_reason: reason,
+        overridden_by: actorId,
+        overridden_at: new Date(),
+      })
+      .where(eq(taskEvents.id, taskEventId))
+      .returning();
+
+    if (!updatedEvent) return null;
+
+    await tx.insert(auditLog).values({
+      entity_type: "TaskEvent",
+      entity_id: taskEventId,
+      action: "task_override",
+      actor_id: actorId,
+      reason,
+      details: {
+        override_status: overrideStatus,
+        previous_status: previousEvent?.status ?? null,
+        previous_override_status: previousEvent?.override_status ?? null,
+      },
+      created_at: new Date(),
+    });
+
+    return updatedEvent;
+  });
 
   if (!updated) return null;
-
-  await db.insert(auditLog).values({
-    entity_type: "TaskEvent",
-    entity_id: taskEventId,
-    action: "task_override",
-    actor_id: actorId,
-    reason,
-    created_at: new Date(),
-  });
 
   return {
     id: updated.id,
@@ -518,6 +825,7 @@ export async function overrideTaskEvent(
     detected_end_time: toISO(updated.detected_end_time),
     duration_seconds: Number(updated.duration_seconds),
     status: updated.status as TaskEventRecord["status"],
+    completion_percentage: Number(updated.completion_percentage ?? 0),
     override_status: (updated.override_status as TaskEventRecord["override_status"]) ?? undefined,
     override_reason: updated.override_reason ?? undefined,
     overridden_by: updated.overridden_by ?? undefined,
@@ -580,6 +888,134 @@ export async function getStatistics(): Promise<{
   return { totalSessions, completedSessions, missedCount, averageDuration, reports: reportsRecords };
 }
 
+export type ModelHealthOverview = {
+  totalEvents: number;
+  averageConfidence: number;
+  lowConfidenceRate: number;
+  tasks: Array<{
+    taskId: string;
+    eventCount: number;
+    averageConfidence: number;
+    lowConfidenceCount: number;
+    missedCount: number;
+  }>;
+};
+
+export type OperationalAlert = {
+  id: string;
+  level: "critical" | "warning" | "info";
+  title: string;
+  detail: string;
+  source: "database" | "inference" | "model" | "compliance";
+};
+
+export async function getModelHealthOverview(): Promise<ModelHealthOverview> {
+  let rows: any[] = [];
+  try {
+    rows = await db.select({
+      taskId: taskEvents.task_id,
+      status: taskEvents.status,
+      confidenceScore: taskEvents.confidence_score,
+    }).from(taskEvents);
+  } catch {
+    return { totalEvents: 0, averageConfidence: 0, lowConfidenceRate: 0, tasks: [] };
+  }
+
+  const grouped = new Map<string, { confidenceTotal: number; lowConfidenceCount: number; missedCount: number; eventCount: number }>();
+  for (const row of rows) {
+    const task = grouped.get(row.taskId) ?? { confidenceTotal: 0, lowConfidenceCount: 0, missedCount: 0, eventCount: 0 };
+    const confidence = Number(row.confidenceScore ?? 0);
+    task.eventCount += 1;
+    task.confidenceTotal += confidence;
+    if (confidence < 0.7) task.lowConfidenceCount += 1;
+    if (row.status === "missed") task.missedCount += 1;
+    grouped.set(row.taskId, task);
+  }
+
+  const tasks = [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([taskId, task]) => ({
+    taskId,
+    eventCount: task.eventCount,
+    averageConfidence: task.eventCount === 0 ? 0 : task.confidenceTotal / task.eventCount,
+    lowConfidenceCount: task.lowConfidenceCount,
+    missedCount: task.missedCount,
+  }));
+  const totalEvents = rows.length;
+  const lowConfidenceCount = tasks.reduce((total, task) => total + task.lowConfidenceCount, 0);
+  const confidenceTotal = tasks.reduce((total, task) => total + task.averageConfidence * task.eventCount, 0);
+
+  return {
+    totalEvents,
+    averageConfidence: totalEvents === 0 ? 0 : confidenceTotal / totalEvents,
+    lowConfidenceRate: totalEvents === 0 ? 0 : lowConfidenceCount / totalEvents,
+    tasks,
+  };
+}
+
+export async function getOperationalAlerts(): Promise<OperationalAlert[]> {
+  const alerts: OperationalAlert[] = [];
+
+  try {
+    await db.execute(sql`select 1`);
+  } catch {
+    alerts.push({
+      id: "database-unavailable",
+      level: "critical",
+      title: "Database unavailable",
+      detail: "The monitoring database health check failed. Persistence and reporting may be stale.",
+      source: "database",
+    });
+  }
+
+  const modelHealth = await getModelHealthOverview();
+  if (modelHealth.totalEvents >= 5 && modelHealth.lowConfidenceRate >= 0.3) {
+    alerts.push({
+      id: "model-low-confidence",
+      level: "warning",
+      title: "Model confidence is degrading",
+      detail: `${Math.round(modelHealth.lowConfidenceRate * 100)}% of recent task events are below the confidence review threshold.`,
+      source: "model",
+    });
+  }
+
+  const inferenceUrl = process.env.INFERENCE_SERVICE_URL || "http://localhost:8001";
+  try {
+    const response = await fetch(`${inferenceUrl}/health`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) {
+      alerts.push({
+        id: "inference-unhealthy",
+        level: "critical",
+        title: "Inference service unhealthy",
+        detail: `Health endpoint returned HTTP ${response.status}.`,
+        source: "inference",
+      });
+    }
+  } catch {
+    alerts.push({
+      id: "inference-unreachable",
+      level: "critical",
+      title: "Inference service unreachable",
+      detail: "The web app could not reach the inference health endpoint.",
+      source: "inference",
+    });
+  }
+
+  const overview = await getMonitoringOverview();
+  for (const task of overview.activeTaskEvents.filter((event) => event.status === "missed" || event.override_status === "missed")) {
+    alerts.push({
+      id: `missed-task-${task.id}`,
+      level: task.override_status ? "warning" : "critical",
+      title: `${task.task_id} missed`,
+      detail: "Review the task evidence and override if the event is unverifiable.",
+      source: "compliance",
+    });
+  }
+
+  return alerts;
+}
+
 export async function getMonitoringOverview(): Promise<{
   activeSession: SessionRecord | null;
   activeCowProcesses: CowProcessRecord[];
@@ -596,10 +1032,62 @@ export async function getMonitoringOverview(): Promise<{
       .update(sessions)
       .set({ status: "completed", actual_end_time: sessions.estimated_end_time, updated_at: new Date() })
       .where(and(inArray(sessions.status, ["scheduled", "active"]), sql`${sessions.estimated_end_time} + interval '30 minutes' < ${now}`));
+    await finalizeStaleCowProcesses();
   } catch { /* table may not exist */ }
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  // Start of today in Morocco time, converted to UTC for DB comparison.
+  // Since 20 Sep 2026 Morocco is permanent UTC+0, Morocco midnight == UTC midnight.
+  // (Older Node tzdata still returns +1, so we bypass Intl for post-cutover dates.)
+  const nowMs = Date.now();
+  const MOROCCO_CUTOVER = Date.UTC(2026, 8, 20, 1, 0, 0);
+  let todayStart: Date;
+  if (nowMs >= MOROCCO_CUTOVER) {
+    const n = new Date();
+    todayStart = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate(), 0, 0, 0));
+  } else {
+    const moroccoToday = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Casablanca",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    todayStart = new Date(`${moroccoToday}T00:00:00+00:00`);
+    {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(moroccoToday);
+      if (match) {
+        const targetUtc = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 0, 0);
+        let candidate = targetUtc;
+        for (let i = 0; i < 3; i += 1) {
+          const parts = new Intl.DateTimeFormat("en", {
+            timeZone: "Africa/Casablanca",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            hourCycle: "h23",
+          })
+            .formatToParts(new Date(candidate))
+            .reduce<Record<string, string>>((acc, p) => {
+              acc[p.type] = p.value;
+              return acc;
+            }, {});
+          const displayedUtc = Date.UTC(
+            Number(parts.year),
+            Number(parts.month) - 1,
+            Number(parts.day),
+            Number(parts.hour),
+            Number(parts.minute),
+          );
+          const targetWall = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 0, 0);
+          const diff = targetWall - displayedUtc;
+          candidate += diff;
+          if (diff === 0) break;
+        }
+        todayStart.setTime(candidate);
+      }
+    }
+  }
 
   let totalSessionRows: any[] = [];
   try { totalSessionRows = await db.select().from(sessions).where(sql`${sessions.created_at} >= ${todayStart}`); } catch { /* table may not exist */ }
@@ -654,7 +1142,9 @@ export async function getMonitoringOverview(): Promise<{
   if (cowIds.length > 0) {
     try {
       activeTaskEventsRaw = await db.select().from(taskEvents).where(inArray(taskEvents.cow_process_id, cowIds)).orderBy(taskEvents.created_at);
-    } catch { /* table may not exist */ }
+    } catch (error) {
+      console.error(`[store] Failed to load task events for active session ${activeSession?.id}:`, error);
+    }
   }
   const activeTaskEvents: TaskEventRecord[] = activeTaskEventsRaw.map((r) => ({
     id: r.id,
@@ -664,6 +1154,7 @@ export async function getMonitoringOverview(): Promise<{
     detected_end_time: toISO(r.detected_end_time),
     duration_seconds: Number(r.duration_seconds),
     status: r.status as TaskEventRecord["status"],
+    completion_percentage: Number(r.completion_percentage ?? 0),
     override_status: (r.override_status as TaskEventRecord["override_status"]) ?? undefined,
     override_reason: r.override_reason ?? undefined,
     overridden_by: r.overridden_by ?? undefined,
@@ -689,6 +1180,7 @@ export async function getTaskEvent(taskEventId: string): Promise<TaskEventRecord
     detected_end_time: toISO(row.detected_end_time),
     duration_seconds: Number(row.duration_seconds),
     status: row.status as TaskEventRecord["status"],
+    completion_percentage: Number((row as any).completion_percentage ?? 0),
     override_status: (row.override_status as TaskEventRecord["override_status"]) ?? undefined,
     override_reason: row.override_reason ?? undefined,
     overridden_by: row.overridden_by ?? undefined,

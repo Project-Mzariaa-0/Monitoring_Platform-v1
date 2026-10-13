@@ -1,6 +1,10 @@
 import { subscribe, unsubscribe } from "../../../lib/realtime/broadcast";
+import { requireApiSession } from "../../../lib/auth/api";
 
 export async function GET(request: Request) {
+  const unauthorized = await requireApiSession();
+  if (unauthorized) return unauthorized;
+
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("session_id");
 

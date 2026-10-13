@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listSessions } from "../../../lib/data/store";
+import { formatInMorocco } from "../../../lib/time/morocco";
 
 export default async function SchedulerPage() {
   const sessions = await listSessions();
@@ -42,7 +43,7 @@ export default async function SchedulerPage() {
               sessions.map((session) => (
                 <tr key={session.id}>
                   <td>{session.id}</td>
-                  <td>{new Date(session.scheduled_start_time).toLocaleString()}</td>
+                  <td>{formatInMorocco(session.scheduled_start_time)} (Morocco)</td>
                   <td>{session.employee_name}</td>
                   <td>{session.row_1_cow_count + session.row_2_cow_count} cows</td>
                   <td>

@@ -4,6 +4,8 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "contract_version": { "const": "1.0" },
+    "event_type": { "const": "task_event" },
     "task_id": {
       "type": "string",
       "enum": ["TASK-01", "TASK-02", "TASK-03", "TASK-04", "TASK-05", "TASK-06"]
@@ -11,20 +13,26 @@
     "session_id": { "type": "string" },
     "cow_position": { "type": "integer", "enum": [1, 2] },
     "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "completion_percentage": { "type": "number", "minimum": 0, "maximum": 100 },
     "status": {
       "type": "string",
-      "enum": ["completed", "missed", "unverifiable"]
+      "enum": ["completed", "missed", "anomaly_flagged", "unverifiable"]
     },
     "detected_start_time": { "type": "string", "format": "date-time" },
-    "detected_end_time": { "type": "string", "format": "date-time" }
+    "detected_end_time": { "type": ["string", "null"] },
+    "duration_seconds": { "type": "integer", "minimum": 0 }
   },
   "required": [
+    "contract_version",
+    "event_type",
     "task_id",
     "session_id",
     "cow_position",
     "confidence_score",
+    "completion_percentage",
     "status",
     "detected_start_time",
-    "detected_end_time"
+    "detected_end_time",
+    "duration_seconds"
   ]
 }

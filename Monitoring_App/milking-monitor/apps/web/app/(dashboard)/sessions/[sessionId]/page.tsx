@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getSessionDetails } from "../../../../lib/data/store";
+import { formatInMorocco } from "../../../../lib/time/morocco";
 import { TASK_LABELS } from "../../../../lib/constants";
 import SessionActions from "../../../../components/dashboard/session-actions";
 import ReportGenerator from "../../../../components/reports/report-generator";
@@ -24,19 +25,20 @@ export default async function SessionPage({ params }: { params: Promise<{ sessio
   const { session, cowProcesses, taskEvents } = details;
 
   // Compute per-task analytics for this session
-  const taskStats = new Map<string, { completed: number; missed: number; total: number; totalDuration: number }>();
+  const taskStats = new Map<string, { completed: number; missed: number; total: number; totalDuration: number; completionTotal: number }>();
   for (const te of taskEvents) {
-    const existing = taskStats.get(te.task_id) ?? { completed: 0, missed: 0, total: 0, totalDuration: 0 };
+    const existing = taskStats.get(te.task_id) ?? { completed: 0, missed: 0, total: 0, totalDuration: 0, completionTotal: 0 };
     existing.total += 1;
     if (te.status === "completed") existing.completed += 1;
     if (te.status === "missed" || te.override_status === "missed") existing.missed += 1;
     existing.totalDuration += te.duration_seconds;
+    existing.completionTotal += Number(te.completion_percentage ?? 0);
     taskStats.set(te.task_id, existing);
   }
 
   const completedTasks = taskEvents.filter((t) => t.status === "completed").length;
   const missedTasks = taskEvents.filter((t) => t.status === "missed" || t.override_status === "missed").length;
-  const compliance = taskEvents.length > 0 ? Math.round((completedTasks / taskEvents.length) * 100) : 0;
+  const compliance = taskEvents.length > 0 ? Math.round(taskEvents.reduce((sum, t) => sum + Number(t.completion_percentage ?? 0), 0) / taskEvents.length) : 0;
   const avgDuration = taskEvents.length > 0 ? Math.round(taskEvents.reduce((sum, t) => sum + t.duration_seconds, 0) / taskEvents.length) : 0;
 
   return (
@@ -81,17 +83,17 @@ export default async function SessionPage({ params }: { params: Promise<{ sessio
             </span>
           </div>
           <div className="data-row">
-            <span>Scheduled Start</span>
-            <strong>{new Date(session.scheduled_start_time).toLocaleString()}</strong>
+            <span>Scheduled Start (Morocco)</span>
+            <strong>{formatInMorocco(session.scheduled_start_time)}</strong>
           </div>
           <div className="data-row">
-            <span>Estimated End</span>
-            <strong>{new Date(session.estimated_end_time).toLocaleString()}</strong>
+            <span>Estimated End (Morocco)</span>
+            <strong>{formatInMorocco(session.estimated_end_time)}</strong>
           </div>
           {session.actual_end_time && (
             <div className="data-row">
-              <span>Actual End</span>
-              <strong>{new Date(session.actual_end_time).toLocaleString()}</strong>
+              <span>Actual End (Morocco)</span>
+              <strong>{formatInMorocco(session.actual_end_time)}</strong>
             </div>
           )}
           <div className="data-row">
@@ -168,7 +170,7 @@ export default async function SessionPage({ params }: { params: Promise<{ sessio
                   </tr>
                 );
               }
-              const taskCompliance = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
+              const taskCompliance = stats.total > 0 ? Math.round(stats.completionTotal / stats.total) : 0;
               const avgTaskDuration = stats.total > 0 ? Math.round(stats.totalDuration / stats.total) : 0;
               return (
                 <tr key={taskId}>
@@ -197,6 +199,16 @@ export default async function SessionPage({ params }: { params: Promise<{ sessio
       </section>
 
       {/* Cow Processes */}
+      {taskEvents.length === 0 && (
+        <section className="card card-pad">
+          <h2 className="section-title">No results recorded</h2>
+          <p className="muted" style={{ margin: 0 }}>
+            This session completed but no task events were ingested (inference service was unreachable or produced no
+            detections). Newly completed sessions now auto-record missing tasks as missed. Re-complete or contact support
+            to backfill this session.
+          </p>
+        </section>
+      )}
       {cowProcesses.length > 0 && (
         <section className="card card-pad">
           <h2 className="section-title">Cow Processes</h2>
@@ -213,8 +225,8 @@ export default async function SessionPage({ params }: { params: Promise<{ sessio
               {cowProcesses.map((cp) => (
                 <tr key={cp.id}>
                   <td>Row {cp.cow_position}</td>
-                  <td>{cp.detected_start_time ? new Date(cp.detected_start_time).toLocaleString() : "N/A"}</td>
-                  <td>{cp.detected_end_time ? new Date(cp.detected_end_time).toLocaleString() : "N/A"}</td>
+                  <td>{formatInMorocco(cp.detected_start_time)}</td>
+                  <td>{formatInMorocco(cp.detected_end_time)}</td>
                   <td>
                     <span className={`status-tag ${cp.overall_status === "completed" ? "status-success" : cp.overall_status === "in_progress" ? "status-warning" : ""}`}>
                       {cp.overall_status.replace(/_/g, " ")}
@@ -235,6 +247,7 @@ export default async function SessionPage({ params }: { params: Promise<{ sessio
             <thead>
               <tr>
                 <th>Task</th>
+                <th>Position</th>
                 <th>Start Time</th>
                 <th>End Time</th>
                 <th>Duration</th>
@@ -242,19 +255,23 @@ export default async function SessionPage({ params }: { params: Promise<{ sessio
               </tr>
             </thead>
             <tbody>
-              {taskEvents.map((te) => (
-                <tr key={te.id}>
-                  <td>{te.task_id}</td>
-                  <td>{te.detected_start_time ? new Date(te.detected_start_time).toLocaleString() : "N/A"}</td>
-                  <td>{te.detected_end_time ? new Date(te.detected_end_time).toLocaleString() : "N/A"}</td>
-                  <td>{te.duration_seconds}s</td>
-                  <td>
-                    <span className={`status-tag ${te.override_status === "completed" || te.status === "completed" ? "status-success" : te.status === "missed" ? "status-danger" : ""}`}>
-                      {(te.override_status ?? te.status).replace(/_/g, " ")}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {taskEvents.map((te) => {
+                const cp = cowProcesses.find((c) => c.id === te.cow_process_id);
+                return (
+                  <tr key={te.id}>
+                    <td>{te.task_id}</td>
+                    <td>{cp ? `Row ${cp.cow_position}` : "—"}</td>
+                    <td>{formatInMorocco(te.detected_start_time)}</td>
+                    <td>{formatInMorocco(te.detected_end_time)}</td>
+                    <td>{te.duration_seconds}s</td>
+                    <td>
+                      <span className={`status-tag ${te.override_status === "completed" || te.status === "completed" ? "status-success" : te.status === "missed" ? "status-danger" : ""}`}>
+                        {(te.override_status ?? te.status).replace(/_/g, " ")}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </section>

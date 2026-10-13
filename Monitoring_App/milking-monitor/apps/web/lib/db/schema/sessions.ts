@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, integer, check, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const sessionsTable = "sessions";
 
@@ -22,4 +23,9 @@ export const sessions = pgTable(sessionsTable, {
 
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => [
+  check("sessions_status_check", sql`${table.status} in ('scheduled', 'active', 'completed', 'ended_early')`),
+  check("sessions_cow_counts_check", sql`${table.row_1_cow_count} >= 0 and ${table.row_2_cow_count} >= 0`),
+  check("sessions_time_order_check", sql`${table.estimated_end_time} >= ${table.scheduled_start_time}`),
+  index("sessions_status_scheduled_start_idx").on(table.status, table.scheduled_start_time),
+]);

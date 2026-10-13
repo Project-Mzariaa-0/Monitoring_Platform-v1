@@ -1,7 +1,11 @@
 import { rateLimit } from "../../../../lib/security/rate-limit";
 import { listActiveSessions } from "../../../../lib/data/store";
+import { requireApiSessionOrServiceToken } from "../../../../lib/auth/api";
 
 export async function GET(request: Request) {
+  const unauthorized = await requireApiSessionOrServiceToken(request);
+  if (unauthorized) return unauthorized;
+
   const clientId = request.headers.get("x-forwarded-for") ?? "anonymous";
   const limit = rateLimit(`sessions:active:${clientId}`, 60, 60_000);
 

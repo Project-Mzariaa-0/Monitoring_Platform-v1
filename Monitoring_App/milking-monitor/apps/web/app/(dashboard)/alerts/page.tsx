@@ -1,12 +1,7 @@
-import { getMonitoringOverview } from "../../../lib/data/store";
-import { TASK_LABELS } from "../../../lib/constants";
+import { getOperationalAlerts } from "../../../lib/data/store";
 
 export default async function AlertsPage() {
-  const overview = await getMonitoringOverview();
-
-  const missedTasks = overview.activeTaskEvents.filter(
-    (t) => t.status === "missed" || t.override_status === "missed",
-  );
+  const alerts = await getOperationalAlerts();
 
   return (
     <div className="page-grid">
@@ -16,7 +11,7 @@ export default async function AlertsPage() {
         </h1>
         <p className="muted">Review active and historical compliance alerts.</p>
       </section>
-      {missedTasks.length === 0 ? (
+      {alerts.length === 0 ? (
         <article className="card card-pad" style={{ borderLeft: "4px solid var(--accent)" }}>
           <div className="muted" style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase" }}>
             Info
@@ -27,27 +22,21 @@ export default async function AlertsPage() {
           </div>
         </article>
       ) : (
-        missedTasks.map((task) => {
-          const cowProcess = overview.activeCowProcesses.find((c) => c.id === task.cow_process_id);
-          const isOverride = Boolean(task.override_status);
-          const level = isOverride ? "warning" : "critical";
+        alerts.map((alert) => {
           return (
             <article
-              key={task.id}
+              key={alert.id}
               className="card card-pad"
-              style={{ borderLeft: `4px solid ${level === "critical" ? "var(--danger)" : "var(--warning)"}` }}
+              style={{ borderLeft: `4px solid ${alert.level === "critical" ? "var(--danger)" : alert.level === "warning" ? "var(--warning)" : "var(--accent)"}` }}
             >
               <div className="muted" style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase" }}>
-                {level}
+                {alert.level} · {alert.source}
               </div>
               <div style={{ fontWeight: 700, marginTop: 8 }}>
-                {TASK_LABELS[task.task_id] ?? task.task_id} missed
+                {alert.title}
               </div>
               <div className="muted" style={{ fontSize: 14, marginTop: 4 }}>
-                Position {cowProcess?.cow_position ?? "unknown"} ·{" "}
-                {task.detected_start_time
-                  ? new Date(task.detected_start_time).toLocaleTimeString()
-                  : "Unknown time"}
+                {alert.detail}
               </div>
             </article>
           );

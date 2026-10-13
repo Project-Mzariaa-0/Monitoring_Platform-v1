@@ -1,0 +1,236 @@
+{
+  "meta": {
+    "project": "Monitoring_Platform-v1",
+    "document_type": "sprint_backlog",
+    "created_at": "2026-09-22",
+    "goal": "Convert the platform from a strong prototype into a production-ready monitoring system through staged, prioritized hardening work."
+  },
+  "sprints": [
+    {
+      "sprint": 1,
+      "name": "Stabilize runtime and security foundations",
+      "goal": "Reduce incidents caused by session lifecycle, auth gaps, and unprotected API traffic.",
+      "priority": "P0",
+      "items": [
+        {
+          "id": "SPR1-01",
+          "title": "Add request correlation IDs and security headers in web middleware",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/web/middleware.ts"
+          ],
+          "description": "Inject request IDs and standard security headers for safer HTTP behavior and easier operational debugging."
+        },
+        {
+          "id": "SPR1-02",
+          "title": "Hardening for API credentials and session access controls",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/web/app/api/**",
+            "Monitoring_App/milking-monitor/apps/web/middleware.ts",
+            "Monitoring_App/milking-monitor/apps/inference-service/src/config/**"
+          ],
+          "description": "Validate internal service auth, allowlist trusted origins, and review admin endpoints and privilege boundaries."
+        },
+        {
+          "id": "SPR1-03",
+          "title": "Add idempotency and duplicate event protection",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/web/app/api/events/ingest/route.ts",
+            "Monitoring_App/milking-monitor/apps/web/lib/data/store.ts"
+          ],
+          "description": "Ensure duplicate event deliveries cannot create duplicate task records or inconsistent state."
+        },
+        {
+          "id": "SPR1-04",
+          "title": "Improve stream-health and degraded-state detection",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/inference-service/src/ingestion/**",
+            "Monitoring_App/milking-monitor/apps/inference-service/src/runtime/**"
+          ],
+          "description": "Track stale frames, dropped streams, frame loss, and degraded detection conditions before they create silent bad events."
+        }
+      ]
+    },
+    {
+      "sprint": 2,
+      "name": "Data integrity and auditability",
+      "goal": "Make task history trustworthy and explainable under production conditions.",
+      "priority": "P0",
+      "items": [
+        {
+          "id": "SPR2-01",
+          "title": "Add DB-level constraints and indexes for audit-safe data",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/web/drizzle/**",
+            "Monitoring_App/milking-monitor/apps/web/lib/db/schema/**"
+          ],
+          "description": "Enforce valid statuses, time ordering, and performant queries for session and task history."
+        },
+        {
+          "id": "SPR2-02",
+          "title": "Create immutable audit event records for overrides and state changes",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/web/lib/data/store.ts",
+            "Monitoring_App/milking-monitor/apps/web/lib/db/schema/**"
+          ],
+          "description": "Track every override and critical system decision in a tamper-resistant, reconstructable audit trail."
+        },
+        {
+          "id": "SPR2-03",
+          "title": "Version event payload contracts and centralize validation",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/inference-service/src/events/**",
+            "Monitoring_App/milking-monitor/apps/web/app/api/events/ingest/route.ts"
+          ],
+          "description": "Use typed contracts and versioned payloads so inference and web app expectations stay aligned."
+        }
+      ]
+    },
+    {
+      "sprint": 3,
+      "name": "ML quality and validation",
+      "goal": "Reduce false positives/negatives and make quality measurable over time.",
+      "priority": "P0",
+      "items": [
+        {
+          "id": "SPR3-01",
+          "title": "Create a labeled validation benchmark for production conditions",
+          "status": "implemented",
+          "files": [
+            "hybrid-model/**",
+            "Monitoring_App/milking-monitor/hybrid-model/**"
+          ],
+          "description": "Capture a representative dataset for task classification and detection performance under real farm conditions."
+        },
+        {
+          "id": "SPR3-02",
+          "title": "Replace brittle threshold logic with validated confidence policies",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/inference-service/src/state_machine/**",
+            "Monitoring_App/milking-monitor/apps/inference-service/src/detection/**"
+          ],
+          "description": "Make task detection and missed-task handling depend on calibrated confidence bands and time windows."
+        },
+        {
+          "id": "SPR3-03",
+          "title": "Add drift and model-health dashboards",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/web/app/(dashboard)/**",
+            "Monitoring_App/milking-monitor/apps/inference-service/src/**"
+          ],
+          "description": "Track model and task drift, detection distribution, and confidence degradation."
+        }
+      ]
+    },
+    {
+      "sprint": 4,
+      "name": "Operational monitoring and alerting",
+      "goal": "Give operators the telemetry and alerts needed to run the system safely in production.",
+      "priority": "P0",
+      "items": [
+        {
+          "id": "SPR4-01",
+          "title": "Add structured logs and tracing with correlation IDs",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/inference-service/src/**",
+            "Monitoring_App/milking-monitor/apps/web/**"
+          ],
+          "description": "Trace session flows across HTTP requests, inference events, and persistence layers."
+        },
+        {
+          "id": "SPR4-02",
+          "title": "Set up alerting for stream loss, DB outage, and abnormal detection behavior",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/.github/workflows/**",
+            "Monitoring_App/milking-monitor/docker-compose.yml"
+          ],
+          "description": "Create operational runbooks and alerting policies for failures that affect compliance outcomes."
+        },
+        {
+          "id": "SPR4-03",
+          "title": "Create production health dashboards for services and sessions",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/apps/web/app/(dashboard)/**",
+            "Monitoring_App/milking-monitor/apps/web/components/**"
+          ],
+          "description": "Expose service health, queue depth, session state, and detection quality to operators."
+        }
+      ]
+    },
+    {
+      "sprint": 5,
+      "name": "Release readiness and deployment hardening",
+      "goal": "Make the platform deployable and safe under repeatable release practices.",
+      "priority": "P1",
+      "items": [
+        {
+          "id": "SPR5-01",
+          "title": "Create production deployment architecture and environment separation",
+          "status": "implemented",
+          "files": [
+            "Monitoring_App/milking-monitor/docker-compose.yml",
+            "Monitoring_App/milking-monitor/.env.example",
+            ".github/workflows/**"
+          ],
+          "description": "Move deployment from local dev assumptions to a production-safe environment model."
+        },
+        {
+          "id": "SPR5-02",
+          "title": "Add CI quality gates and smoke tests before production release",
+          "status": "implemented",
+          "files": [
+            ".github/workflows/**",
+            "Monitoring_App/milking-monitor/apps/web/package.json",
+            "Monitoring_App/milking-monitor/apps/inference-service/tests/**"
+          ],
+          "description": "Ensure build, typecheck, integration tests, and contract checks are mandatory before release."
+        },
+        {
+          "id": "SPR5-03",
+          "title": "Finalize documentation, ADRs, and operator runbooks",
+          "status": "implemented",
+          "files": [
+            "README.md",
+            "Monitoring_App/milking-monitor/README.md",
+            "agent_plans/**",
+            "Monitoring_App/milking-monitor/docs/**"
+          ],
+          "description": "Document production ownership, release process, rollback steps, and operational procedures."
+        }
+      ]
+    }
+  ],
+  "backlog_priorities": {
+    "next_30_days": [
+      "SPR1-01",
+      "SPR1-02",
+      "SPR1-03",
+      "SPR1-04",
+      "SPR2-01",
+      "SPR2-02",
+      "SPR2-03",
+      "SPR3-01",
+      "SPR3-02"
+    ],
+    "next_60_days": [
+      "SPR3-03",
+      "SPR4-01",
+      "SPR4-02",
+      "SPR4-03",
+      "SPR5-01",
+      "SPR5-02",
+      "SPR5-03"
+    ]
+  }
+}

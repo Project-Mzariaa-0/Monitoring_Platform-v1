@@ -2,6 +2,7 @@ import { rateLimit } from "../../../lib/security/rate-limit";
 import { createSession, listSessions } from "../../../lib/data/store";
 import { notifySessionWindow } from "../../../lib/inference-client/notify-session-window";
 import { createSessionSchema } from "../../../lib/validation/session";
+import { requireApiSession } from "../../../lib/auth/api";
 
 export async function GET(request: Request) {
   const clientId = request.headers.get("x-forwarded-for") ?? "anonymous";
@@ -16,6 +17,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const unauthorized = await requireApiSession();
+  if (unauthorized) return unauthorized;
+
   const clientId = request.headers.get("x-forwarded-for") ?? "anonymous";
   const limit = rateLimit(`sessions:post:${clientId}`, 20, 60_000);
 

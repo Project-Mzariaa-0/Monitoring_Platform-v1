@@ -1,8 +1,23 @@
 import { createReport, getSessionDetails, getEmployeeAnalytics, getTaskAnalytics } from "../../../../lib/data/store";
 import { generateReportSchema } from "../../../../lib/validation/report";
 import { generateDocxReport } from "../../../../lib/reporting/docx-generator";
+import { getApiSession, requireApiSession } from "../../../../lib/auth/api";
+import { rateLimit } from "../../../../lib/security/rate-limit";
 
 export async function POST(request: Request) {
+  const unauthorized = await requireApiSession();
+  if (unauthorized) return unauthorized;
+
+  const session = await getApiSession();
+  const actorId = (session?.user as { id?: string; email?: string } | undefined)?.id
+    ?? session?.user?.email
+    ?? request.headers.get("x-forwarded-for")
+    ?? "anonymous";
+  const limit = rateLimit(`reports:generate:${actorId}`, 10, 60_000);
+  if (!limit.allowed) {
+    return Response.json({ ok: false, error: "Rate limit exceeded" }, { status: 429 });
+  }
+
   const body = await request.json().catch(() => null);
   if (!body) {
     return Response.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });

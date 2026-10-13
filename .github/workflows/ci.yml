@@ -53,6 +53,10 @@ jobs:
       - name: Unit tests
         run: npm run test:ci
 
+      - name: Validate production Compose file
+        working-directory: Monitoring_App/milking-monitor
+        run: docker compose -f docker-compose.prod.yml config --quiet
+
   inference-checks:
     name: Inference Service — Lint, Tests
     runs-on: ubuntu-latest
@@ -85,6 +89,31 @@ jobs:
 
       - name: Pytest
         run: pytest tests/ -v --tb=short
+
+      - name: Compile Python sources
+        run: python -m compileall -q src tests
+
+      - name: Validate shared event contracts
+        working-directory: Monitoring_App/milking-monitor
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("packages/shared-contracts")
+          required = {
+              "task-event.schema.json": {"contract_version": "1.0", "event_type": "task_event"},
+              "cow-process-event.schema.json": {"contract_version": "1.0"},
+          }
+          for filename, expected in required.items():
+              schema = json.loads((root / filename).read_text(encoding="utf-8"))
+              properties = schema["properties"]
+              required_fields = set(schema["required"])
+              for field, value in expected.items():
+                  assert properties[field].get("const") == value, f"{filename}: invalid {field}"
+                  assert field in required_fields, f"{filename}: {field} is not required"
+              assert schema.get("additionalProperties") is False, f"{filename}: contract must be strict"
+          print("Shared event contracts validated")
 
   integration-checks:
     name: Integration — Docker Compose Smoke Test
@@ -158,6 +187,9 @@ jobs:
           done
           echo "Web app status: $status"
           [ "$status" = "200" ] || [ "$status" = "302" ]
+
+      - name: Validate production Compose configuration
+        run: docker compose -f docker-compose.prod.yml config --quiet
 
       - name: Dump logs on failure
         if: failure()
