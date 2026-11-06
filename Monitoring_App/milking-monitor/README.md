@@ -135,6 +135,7 @@ Production configuration and operational procedures are documented in:
 - [Production deployment ADR](docs/adr/001-production-deployment.md)
 - [Production operations runbook](docs/runbooks/production-operations.md)
 - [Release and rollback runbook](docs/runbooks/release-rollback.md)
+- [Architecture and UML diagrams](docs/README.md)
 
 ## Service Details
 
